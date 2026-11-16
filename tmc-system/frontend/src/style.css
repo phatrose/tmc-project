@@ -1,0 +1,12 @@
+/* PHỤ TRÁCH: Task 8. Layout cơ bản, chưa phải thiết kế cuối. */
+* { box-sizing: border-box; }
+body { margin: 0; color: #182b42; background: #f5f7fa; font-family: system-ui, sans-serif; }
+.layout { display: flex; min-height: 100vh; }
+aside { width: 260px; padding: 24px; background: #fff; border-right: 1px solid #dce2ea; }
+nav { display: grid; gap: 8px; }
+button { padding: 12px; text-align: left; color: inherit; background: white; border: 1px solid #dce2ea; border-radius: 6px; cursor: pointer; font: inherit; }
+button[aria-current="page"] { background: #e6efff; border-color: #376bc5; }
+button:focus-visible { outline: 3px solid #376bc5; outline-offset: 2px; }
+main { flex: 1; padding: 40px; }
+.status { color: #775100; }
+@media (max-width: 640px) { .layout { flex-direction: column; } aside { width: 100%; } main { padding: 24px; } }

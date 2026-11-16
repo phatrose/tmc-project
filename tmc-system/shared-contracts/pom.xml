@@ -1,0 +1,10 @@
+<!-- PHỤ TRÁCH: Task 8. Khung dependency đã chọn; chưa có implementation. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>vn.tmc</groupId>
+    <artifactId>tmc-system</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>shared-contracts</artifactId>
+</project>

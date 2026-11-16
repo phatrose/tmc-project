@@ -1,0 +1,15 @@
+-- PHỤ TRÁCH: Task 7. Nguồn: main.pdf §6.1–6.3.
+-- Chỉ là vị trí triển khai, chưa có SQL thực thi.
+-- TODO: WAL; local_attendance_events; event_delivery; local_sync_batches;
+-- local_sync_batch_items; local_replay_cache; cached_revocations;
+-- trusted_signing_keys; cached_access_policy; edge_runtime_state.
+-- TODO: sequence/event/replay/delivery cùng transaction trước lệnh cổng.
+-- TODO: batch membership và bootstrap revision bền vững; recovery và retention.
+-- PHỐI HỢP: Task 2, Task 3, Task 6, Task 8.
+
+-- HƯỚNG DẪN TRIỂN KHAI:
+-- Tạo schema/version cho SQLite cục bộ; không kết nối PostgreSQL từ Edge.
+-- Ràng buộc unique jti và sequence phải đi cùng transaction lưu event/delivery.
+-- Kiểm tra cấu hình WAL/durability khi mở kết nối trong SqliteStore, không chỉ ở file DDL.
+-- Lưu batch ID/membership trước gửi; ACK/cursor và cache/revision phải cập nhật nguyên tử.
+-- Kiểm thử DB trống, restart, crash giữa transaction và queue chưa ACK; không coi file comment là migration chạy được.

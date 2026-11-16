@@ -1,0 +1,15 @@
+**/target/
+**/node_modules/
+**/dist/
+.cache/
+.env
+*.db
+*.db-wal
+*.db-shm
+*.pem
+*.p12
+*.key
+.idea/
+.vscode/*
+!.vscode/settings.json
+*.log
