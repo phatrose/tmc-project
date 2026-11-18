@@ -5,6 +5,8 @@ import vn.tmc.contracts.EventEnvelope;
 import vn.tmc.contracts.SyncBatchRequest;
 import vn.tmc.contracts.SyncBatchAck;
 
+import java.nio.file.Path;
+
 /**
  * KHUNG TRIỂN KHAI — có khai báo, chưa hiện thực nghiệp vụ.
  * PHỤ TRÁCH: Task 7.
@@ -21,6 +23,12 @@ import vn.tmc.contracts.SyncBatchAck;
  * - Lưu ý bàn giao: Kiểm thử crash giữa các bước, trùng jti và mất ACK; không xóa PENDING/FAILED để giảm dung lượng.
  */
 public final class SqliteStore implements LocalEventStorePort {
+    private final SqliteDatabase database;
+
+    public SqliteStore(Path databaseFile) {
+        database = new SqliteDatabase(databaseFile);
+    }
+
     @Override
     public void append(EventEnvelope event) {
         throw new UnsupportedOperationException("TODO: append");
