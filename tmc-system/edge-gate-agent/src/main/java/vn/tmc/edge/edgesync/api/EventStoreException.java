@@ -1,6 +1,6 @@
 package vn.tmc.edge.edgesync.api;
 
-/** A local persistence failure that the scan adapter can map to a Contract v1 error. */
+/** A persistence rejection or failure that the scan adapter can map to a Contract v1 code. */
 public final class EventStoreException extends RuntimeException {
     public enum Code {
         STORAGE_UNAVAILABLE, REPLAY, DUPLICATE_SCAN, IDEMPOTENCY_CONFLICT

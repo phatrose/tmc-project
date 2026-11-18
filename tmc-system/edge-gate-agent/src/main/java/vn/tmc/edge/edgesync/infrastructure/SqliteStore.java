@@ -1,13 +1,19 @@
 package vn.tmc.edge.edgesync.infrastructure;
 
-import vn.tmc.edge.edgesync.api.LocalEventStorePort;
-import vn.tmc.contracts.EventEnvelope;
-import vn.tmc.contracts.SyncBatchRequest;
+import vn.tmc.contracts.AttendancePayload;
 import vn.tmc.contracts.SyncBatchAck;
+import vn.tmc.contracts.SyncBatchRequest;
+import vn.tmc.edge.edgesync.api.CommandIntent;
 import vn.tmc.edge.edgesync.api.CommittedEvent;
 import vn.tmc.edge.edgesync.api.EventDraft;
 import vn.tmc.edge.edgesync.api.EventPayload;
+import vn.tmc.edge.edgesync.api.EventPayload.CommandMode;
+import vn.tmc.edge.edgesync.api.EventPayload.ScanMode;
 import vn.tmc.edge.edgesync.api.EventStoreException;
+import vn.tmc.edge.edgesync.api.LocalEventStorePort;
+import vn.tmc.edge.edgesync.api.ReplayReservation;
+import vn.tmc.edge.edgesync.api.ScanInputFingerprint;
+import vn.tmc.edge.edgesync.api.ScanOutcome;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
@@ -17,7 +23,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-import static vn.tmc.edge.edgesync.api.EventStoreException.Code.STORAGE_UNAVAILABLE;
+import static vn.tmc.edge.edgesync.api.EventStoreException.Code.*;
 
 /** File-backed Edge event store. Each operation owns and closes its SQLite connection. */
 public final class SqliteStore implements LocalEventStorePort {
@@ -54,9 +60,88 @@ public final class SqliteStore implements LocalEventStorePort {
     }
 
     @Override
-    public void reserveAndAppend(EventEnvelope event, String jti) {
-        throw new UnsupportedOperationException("TODO: atomic replay reservation and persistence");
+    public CommittedEvent reserveAndAppend(UUID scanId, EventDraft draft, ReplayReservation reservation) {
+        Objects.requireNonNull(scanId, "scanId");
+        if (!scanId.equals(draft.correlationId())) {
+            throw new IllegalArgumentException("The event correlationId must equal scanId");
+        }
+        Objects.requireNonNull(reservation, "reservation");
+        return database.write(connection -> {
+            var previous = SqliteScans.findOutcome(connection, scanId, reservation.inputFingerprint());
+            if (previous.isPresent()) {
+                var outcome = previous.orElseThrow();
+                if (!outcome.gateId().equals(draft.gateId())) {
+                    throw new EventStoreException(IDEMPOTENCY_CONFLICT);
+                }
+                if (outcome.eventId() == null) {
+                    throw new SQLException("Stored scan has no committed event");
+                }
+                return SqliteEvents.find(connection, outcome.eventId())
+                        .orElseThrow(() -> new SQLException("Stored scan event is missing"));
+            }
+
+            var attendance = requireQrAttendance(draft, reservation);
+            var command = qrCommand(draft.gateId(), attendance.commandId());
+            // A reused jti is REPLAY even when the same employee also matches the business window.
+            if (SqliteScans.hasReplay(connection, reservation)) {
+                throw new EventStoreException(REPLAY);
+            }
+            Instant now = now();
+            if (SqliteScans.hasRecentAllow(connection, reservation, now)) {
+                throw new EventStoreException(DUPLICATE_SCAN);
+            }
+
+            SqliteScans.reserveQr(connection, reservation, now);
+            var event = SqliteEvents.insert(connection, draft, now);
+            UUID eventId = event.envelope().eventId();
+            SqliteScans.linkQrEvent(connection, reservation.jti(), eventId);
+            SqliteScans.insertAllow(connection, scanId, reservation, ScanMode.valueOf(attendance.source().name()),
+                    draft.occurredAt(), eventId, command, now);
+            SqliteEvents.advanceSequence(connection, event.envelope());
+            return new CommittedEvent(event.envelope(), event.committedAt(), Optional.of(command));
+        });
     }
+
+    @Override
+    public Optional<ScanOutcome> findScanOutcome(UUID scanId, ScanInputFingerprint fingerprint) {
+        Objects.requireNonNull(scanId, "scanId");
+        Objects.requireNonNull(fingerprint, "fingerprint");
+        try (var connection = database.open()) {
+            return SqliteScans.findOutcome(connection, scanId, fingerprint);
+        } catch (SQLException failure) {
+            throw new EventStoreException(STORAGE_UNAVAILABLE, failure);
+        }
+    }
+
+    private static AttendancePayload requireQrAttendance(EventDraft draft, ReplayReservation reservation) {
+        if (!(draft.payload() instanceof EventPayload.Attendance payload)
+                || reservation.kind() != ReplayReservation.Kind.QR) {
+            throw new IllegalArgumentException("This transaction requires QR attendance and a QR reservation");
+        }
+        var attendance = payload.value();
+        if (attendance.source() == null || attendance.source() == AttendancePayload.Source.MANUAL
+                || attendance.kid() == null || attendance.kid().isBlank() || attendance.tokenIssuedAt() == null
+                || attendance.operatorId() != null || attendance.reason() != null
+                || !reservation.jti().toString().equals(attendance.jti())
+                || reservation.employeeId() == null || !reservation.employeeId().toString().equals(attendance.employeeId())
+                || reservation.direction() == null || reservation.direction() != attendance.direction()
+                || !reservation.gateId().equals(draft.gateId())) {
+            throw new IllegalArgumentException("QR attendance and replay reservation must describe the same verified scan");
+        }
+        return attendance;
+    }
+
+    private static CommandIntent qrCommand(UUID gateId, String suppliedId) {
+        if (suppliedId == null) {
+            throw new IllegalArgumentException("commandId is required");
+        }
+        UUID commandId = UUID.fromString(suppliedId);
+        if (commandId.version() != 4 || commandId.variant() != 2 || !commandId.toString().equals(suppliedId)) {
+            throw new IllegalArgumentException("commandId must be a lowercase UUIDv4");
+        }
+        return new CommandIntent(commandId, gateId, null, null, CommandMode.QR);
+    }
+
     @Override
     public SyncBatchRequest pendingBatch() {
         throw new UnsupportedOperationException("TODO: durable batch selection");
