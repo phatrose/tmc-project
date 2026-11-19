@@ -20,6 +20,10 @@ import java.util.List;
  * - Lưu ý bàn giao: Kiểm tra ACK thuộc lô đã gửi; không tăng cursor theo max sequence khi vẫn còn khoảng trống.
  */
 public record SyncBatchAck(UUID syncBatchId, List<EventAck> acks, long lastContiguousSequenceNo) {
+    public SyncBatchAck {
+        acks = acks == null ? null : List.copyOf(acks);
+    }
+
     public enum Status { ACCEPTED, DUPLICATE, CONFLICT, REJECTED }
     public record EventAck(UUID eventId, Status status, Instant acceptedAt, String code) {}
 }

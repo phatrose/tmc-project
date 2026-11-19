@@ -2,6 +2,7 @@ package vn.tmc.contracts;
 
 import java.util.UUID;
 import java.util.List;
+import java.util.HashSet;
 
 /**
  * KHUNG TRIỂN KHAI — có khai báo, chưa hiện thực nghiệp vụ.
@@ -20,5 +21,27 @@ import java.util.List;
  */
 public record SyncBatchRequest(UUID syncBatchId, List<EventEnvelope> events) {
     public static final int MAX_EVENTS = 50;
-    // TODO[Task 7]: validate size, required fields and stable retry membership.
+    public static final int MAX_BODY_BYTES = 1024 * 1024;
+
+    public SyncBatchRequest {
+        if (syncBatchId == null || syncBatchId.version() != 4 || syncBatchId.variant() != 2) {
+            throw new IllegalArgumentException("syncBatchId must be UUIDv4");
+        }
+        events = List.copyOf(events);
+        if (events.isEmpty() || events.size() > MAX_EVENTS) {
+            throw new IllegalArgumentException("A sync batch must contain 1 to 50 events");
+        }
+        var first = events.getFirst();
+        var ids = new HashSet<UUID>();
+        long previous = 0;
+        for (var event : events) {
+            if (event.eventId() == null || !ids.add(event.eventId()) || event.sequenceNo() <= previous
+                    || event.sequenceNo() > 9_007_199_254_740_991L
+                    || first.edgeId() == null || !first.edgeId().equals(event.edgeId())
+                    || first.factoryId() == null || !first.factoryId().equals(event.factoryId())) {
+                throw new IllegalArgumentException("Sync batch members must have unique IDs, increasing sequences and one identity");
+            }
+            previous = event.sequenceNo();
+        }
+    }
 }

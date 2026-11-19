@@ -143,11 +143,26 @@ public final class SqliteStore implements LocalEventStorePort {
     }
 
     @Override
-    public SyncBatchRequest pendingBatch() {
-        throw new UnsupportedOperationException("TODO: durable batch selection");
+    public SyncBatchRequest pendingBatch(int maxEvents) {
+        return pendingBatch(null, maxEvents);
+    }
+
+    public SyncBatchRequest pendingBatch(UUID edgeId, int maxEvents) {
+        if (maxEvents < 1 || maxEvents > SyncBatchRequest.MAX_EVENTS) {
+            throw new IllegalArgumentException("Batch limits must be between 1 and 50");
+        }
+        return database.write(connection -> SqliteBatches.pending(connection,
+                edgeId == null ? null : edgeId.toString(), maxEvents, now()));
     }
     @Override
     public void applyAcknowledgements(SyncBatchAck acknowledgement) {
-        throw new UnsupportedOperationException("TODO: per-event ACK and cursor transaction");
+        applyAcknowledgements(acknowledgement == null ? null : acknowledgement.syncBatchId(), acknowledgement);
+    }
+
+    public void applyAcknowledgements(UUID expectedBatchId, SyncBatchAck acknowledgement) {
+        database.write(connection -> {
+            SqliteBatches.apply(connection, expectedBatchId, acknowledgement);
+            return null;
+        });
     }
 }

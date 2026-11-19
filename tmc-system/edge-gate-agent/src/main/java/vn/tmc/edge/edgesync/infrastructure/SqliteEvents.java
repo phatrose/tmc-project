@@ -6,6 +6,7 @@ import vn.tmc.edge.edgesync.api.EventDraft;
 
 import java.io.IOException;
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.Optional;
@@ -86,8 +87,7 @@ final class SqliteEvents {
 
     static Optional<CommittedEvent> find(Connection connection, UUID eventId) throws SQLException {
         try (var statement = connection.prepareStatement("""
-                SELECT event_type, schema_version, edge_id, gate_id, factory_id, sequence_no, correlation_id,
-                    occurred_at, payload_sha256, payload_text, committed_at
+                SELECT *
                 FROM local_events WHERE event_id = ?
                 """)) {
             statement.setString(1, eventId.toString());
@@ -95,13 +95,15 @@ final class SqliteEvents {
                 if (!result.next()) {
                     return Optional.empty();
                 }
-                var envelope = new EventEnvelope(eventId, result.getString("event_type"), result.getInt("schema_version"),
-                        result.getString("edge_id"), result.getString("gate_id"), result.getString("factory_id"),
-                        result.getLong("sequence_no"), result.getString("correlation_id"),
-                        Instant.ofEpochMilli(result.getLong("occurred_at")), result.getString("payload_sha256"),
-                        result.getString("payload_text"));
-                return Optional.of(new CommittedEvent(envelope, Instant.ofEpochMilli(result.getLong("committed_at"))));
+                return Optional.of(new CommittedEvent(envelope(result), Instant.ofEpochMilli(result.getLong("committed_at"))));
             }
         }
+    }
+
+    static EventEnvelope envelope(ResultSet row) throws SQLException {
+        return new EventEnvelope(UUID.fromString(row.getString("event_id")), row.getString("event_type"),
+                row.getInt("schema_version"), row.getString("edge_id"), row.getString("gate_id"), row.getString("factory_id"),
+                row.getLong("sequence_no"), row.getString("correlation_id"), Instant.ofEpochMilli(row.getLong("occurred_at")),
+                row.getString("payload_sha256"), row.getString("payload_text"));
     }
 }

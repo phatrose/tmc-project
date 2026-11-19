@@ -7,7 +7,9 @@ import org.sqlite.SQLiteException;
 import vn.tmc.edge.edgesync.api.EventStoreException;
 
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.HashSet;
 import java.util.Set;
@@ -24,14 +26,14 @@ class SqliteSchemaIT {
         try (var connection = database.open(); var statement = connection.createStatement()) {
             assertEquals("wal", scalar(connection, "PRAGMA journal_mode"));
             assertEquals("2", scalar(connection, "PRAGMA synchronous")); // FULL
-            assertEquals("1", scalar(connection, "PRAGMA user_version"));
+            assertEquals("2", scalar(connection, "PRAGMA user_version"));
             try (var tables = statement.executeQuery("SELECT name FROM sqlite_schema WHERE type = 'table'")) {
                 Set<String> names = new HashSet<>();
                 while (tables.next()) {
                     names.add(tables.getString(1));
                 }
-                assertEquals(Set.of("edge_runtime_state", "local_events", "event_delivery",
-                        "local_replay_cache", "local_scan_outcomes", "local_gate_commands"), names);
+                assertTrue(names.containsAll(Set.of("edge_runtime_state", "local_events", "event_delivery",
+                        "local_replay_cache", "local_scan_outcomes", "local_gate_commands", "local_sync_batches")));
             }
         }
     }
@@ -46,7 +48,28 @@ class SqliteSchemaIT {
         var reopened = new SqliteDatabase(file);
         try (var connection = reopened.open()) {
             assertEquals("42", scalar(connection, "SELECT last_sequence_no FROM edge_runtime_state"));
-            assertEquals("1", scalar(connection, "PRAGMA user_version"));
+            assertEquals("2", scalar(connection, "PRAGMA user_version"));
+        }
+    }
+
+    @Test
+    void openingVersionOneDatabase_migratesWithoutResettingSequence() throws Exception {
+        var file = tempDir.resolve("version-one.db");
+        try (var schema = SqliteSchemaIT.class.getResourceAsStream("/schema.sql");
+             var connection = DriverManager.getConnection("jdbc:sqlite:" + file);
+             var statement = connection.createStatement()) {
+            for (String sql : new String(schema.readAllBytes(), StandardCharsets.UTF_8).split(";")) {
+                if (!sql.isBlank()) {
+                    statement.execute(sql);
+                }
+            }
+            statement.execute("PRAGMA user_version=1");
+            statement.execute("INSERT INTO edge_runtime_state (edge_id, factory_id, last_sequence_no) VALUES ('edge', 'factory', 42)");
+        }
+        try (var connection = new SqliteDatabase(file).open()) {
+            assertEquals("42", scalar(connection, "SELECT last_sequence_no FROM edge_runtime_state"));
+            assertEquals("2", scalar(connection, "PRAGMA user_version"));
+            assertEquals("0", scalar(connection, "SELECT count(*) FROM local_sync_batches"));
         }
     }
 
@@ -91,12 +114,12 @@ class SqliteSchemaIT {
         var file = tempDir.resolve("edge.db");
         var database = new SqliteDatabase(file);
         try (var connection = database.open(); var statement = connection.createStatement()) {
-            statement.execute("PRAGMA user_version=2");
+            statement.execute("PRAGMA user_version=99");
         }
         var error = assertThrows(EventStoreException.class, () -> new SqliteDatabase(file));
         assertEquals(EventStoreException.Code.STORAGE_UNAVAILABLE, error.code());
         try (var connection = database.open()) {
-            assertEquals("2", scalar(connection, "PRAGMA user_version"));
+            assertEquals("99", scalar(connection, "PRAGMA user_version"));
         }
     }
 

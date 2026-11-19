@@ -15,7 +15,7 @@ import static vn.tmc.edge.edgesync.api.EventStoreException.Code.STORAGE_UNAVAILA
 
 /** Opens short-lived connections to a versioned Edge database. */
 final class SqliteDatabase {
-    private static final int SCHEMA_VERSION = 1;
+    private static final String[] MIGRATIONS = {"/schema.sql", "/schema-v2.sql"};
     private final String jdbcUrl;
 
     SqliteDatabase(Path file) {
@@ -101,24 +101,23 @@ final class SqliteDatabase {
                 result.next();
                 version = result.getInt(1);
             }
-            if (version == SCHEMA_VERSION) {
-                return;
-            }
-            if (version != 0) {
+            if (version < 0 || version > MIGRATIONS.length) {
                 throw new SQLException("Unsupported Edge schema version: " + version);
             }
-            try (var schema = SqliteDatabase.class.getResourceAsStream("/schema.sql")) {
-                if (schema == null) {
-                    throw new IOException("Missing Edge schema.sql");
-                }
-                // V1 contains plain DDL without embedded statement terminators.
-                for (String sql : new String(schema.readAllBytes(), StandardCharsets.UTF_8).split(";")) {
-                    if (!sql.isBlank()) {
-                        statement.execute(sql);
+            for (int index = version; index < MIGRATIONS.length; index++) {
+                try (var schema = SqliteDatabase.class.getResourceAsStream(MIGRATIONS[index])) {
+                    if (schema == null) {
+                        throw new IOException("Missing Edge migration " + MIGRATIONS[index]);
+                    }
+                    // Migration files contain plain DDL without embedded statement terminators.
+                    for (String sql : new String(schema.readAllBytes(), StandardCharsets.UTF_8).split(";")) {
+                        if (!sql.isBlank()) {
+                            statement.execute(sql);
+                        }
                     }
                 }
+                statement.execute("PRAGMA user_version=" + (index + 1));
             }
-            statement.execute("PRAGMA user_version=" + SCHEMA_VERSION);
         }
     }
 }

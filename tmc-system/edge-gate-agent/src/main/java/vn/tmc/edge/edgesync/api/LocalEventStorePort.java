@@ -22,8 +22,7 @@ public interface LocalEventStorePort {
 
     /** Durably append a non-attendance event and initialize its delivery state. */
     CommittedEvent append(EventDraft draft);
-    // TODO: lưu lô/membership bền vững; giới hạn 50 và giữ nguyên qua retry.
-    SyncBatchRequest pendingBatch();
-    // TODO: ACK và cursor cùng transaction; không ACK hàng loạt chỉ vì HTTP 200.
+    SyncBatchRequest pendingBatch(int maxEvents);
+
     void applyAcknowledgements(SyncBatchAck acknowledgement);
 }

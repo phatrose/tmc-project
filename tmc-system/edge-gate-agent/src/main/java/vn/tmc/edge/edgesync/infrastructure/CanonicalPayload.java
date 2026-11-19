@@ -32,7 +32,7 @@ record CanonicalPayload(String text, String sha256) {
         return new CanonicalPayload(canonical, sha256(canonical.getBytes(StandardCharsets.UTF_8)));
     }
 
-    private static String sha256(byte[] bytes) {
+    static String sha256(byte[] bytes) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
         } catch (NoSuchAlgorithmException failure) {
