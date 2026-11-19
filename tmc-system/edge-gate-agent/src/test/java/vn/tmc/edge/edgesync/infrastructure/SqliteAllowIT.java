@@ -112,6 +112,16 @@ class SqliteAllowIT {
     }
 
     @Test
+    void businessDuplicate_usesOccurrenceTimeWhenPersistenceIsDelayed() throws SQLException {
+        reserve(store(COMMITTED_AT), firstAttempt());
+        var delayed = differentTokenAfter(Duration.ofSeconds(29));
+        var failure = assertThrows(EventStoreException.class,
+                () -> reserve(store(OCCURRED_AT.plusSeconds(31)), delayed));
+        assertEquals(Code.DUPLICATE_SCAN, failure.code());
+        assertCounts(1);
+    }
+
+    @Test
     void businessDuplicate_after30Seconds_allowsNewEvent() throws SQLException {
         reserve(store(COMMITTED_AT), firstAttempt());
         var next = reserve(store(COMMITTED_AT.plusSeconds(31)), differentTokenAfter(Duration.ofSeconds(31)));

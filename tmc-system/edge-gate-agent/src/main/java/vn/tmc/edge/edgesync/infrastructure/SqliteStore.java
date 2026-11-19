@@ -87,7 +87,7 @@ public final class SqliteStore implements LocalEventStorePort {
                 throw new EventStoreException(REPLAY);
             }
             Instant now = now();
-            if (SqliteScans.hasRecentAllow(connection, reservation, now)) {
+            if (SqliteScans.hasRecentAllow(connection, reservation, draft.occurredAt())) {
                 throw new EventStoreException(DUPLICATE_SCAN);
             }
 
