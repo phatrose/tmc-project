@@ -14,6 +14,7 @@ import vn.tmc.edge.edgesync.api.LocalEventStorePort;
 import vn.tmc.edge.edgesync.api.ReplayReservation;
 import vn.tmc.edge.edgesync.api.ScanInputFingerprint;
 import vn.tmc.edge.edgesync.api.ScanOutcome;
+import vn.tmc.edge.edgesync.domain.SyncJournal;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
@@ -26,7 +27,7 @@ import java.util.UUID;
 import static vn.tmc.edge.edgesync.api.EventStoreException.Code.*;
 
 /** File-backed Edge event store. Each operation owns and closes its SQLite connection. */
-public final class SqliteStore implements LocalEventStorePort {
+public final class SqliteStore implements LocalEventStorePort, SyncJournal {
     private final SqliteDatabase database;
     private final Clock clock;
 
@@ -162,6 +163,52 @@ public final class SqliteStore implements LocalEventStorePort {
     public void applyAcknowledgements(UUID expectedBatchId, SyncBatchAck acknowledgement) {
         database.write(connection -> {
             SqliteBatches.apply(connection, expectedBatchId, acknowledgement);
+            return null;
+        });
+    }
+
+    @Override
+    public Attempt claim(UUID edgeId) {
+        return database.write(connection -> SqliteSyncJournal.claim(connection, edgeId, now()));
+    }
+
+    @Override
+    public void complete(Attempt attempt, SyncBatchAck response) {
+        database.write(connection -> {
+            SqliteSyncJournal.requireInFlight(connection, attempt);
+            SqliteBatches.apply(connection, attempt.request().syncBatchId(), response);
+            return null;
+        });
+    }
+
+    @Override
+    public void defer(Attempt attempt, Schedule schedule) {
+        database.write(connection -> {
+            SqliteSyncJournal.defer(connection, attempt, schedule);
+            return null;
+        });
+    }
+
+    @Override
+    public Schedule schedule(UUID edgeId) {
+        try (var connection = database.open()) {
+            return SqliteSyncJournal.schedule(connection, edgeId);
+        } catch (SQLException failure) {
+            throw new EventStoreException(STORAGE_UNAVAILABLE, failure);
+        }
+    }
+
+    @Override
+    public void resume(UUID edgeId) {
+        database.write(connection -> {
+            SqliteSyncJournal.resume(connection, edgeId);
+            return null;
+        });
+    }
+
+    public void recover() {
+        database.write(connection -> {
+            SqliteSyncJournal.recover(connection, now());
             return null;
         });
     }

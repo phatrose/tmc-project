@@ -15,7 +15,7 @@ import static vn.tmc.edge.edgesync.api.EventStoreException.Code.STORAGE_UNAVAILA
 
 /** Opens short-lived connections to a versioned Edge database. */
 final class SqliteDatabase {
-    private static final String[] MIGRATIONS = {"/schema.sql", "/schema-v2.sql"};
+    private static final String[] MIGRATIONS = {"/schema.sql", "/schema-v2.sql", "/schema-v3.sql"};
     private final String jdbcUrl;
 
     SqliteDatabase(Path file) {
