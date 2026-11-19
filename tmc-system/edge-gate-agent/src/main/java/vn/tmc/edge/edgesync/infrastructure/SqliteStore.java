@@ -15,6 +15,7 @@ import vn.tmc.edge.edgesync.api.ReplayReservation;
 import vn.tmc.edge.edgesync.api.ScanInputFingerprint;
 import vn.tmc.edge.edgesync.api.ScanOutcome;
 import vn.tmc.edge.edgesync.domain.SyncJournal;
+import vn.tmc.edge.edgesync.domain.BootstrapCache;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
@@ -211,5 +212,9 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal {
             SqliteSyncJournal.recover(connection, now());
             return null;
         });
+    }
+
+    public BootstrapCache bootstrapCache(BootstrapCache.Identity identity) {
+        return new SqliteBootstrapCache(database, Objects.requireNonNull(identity), clock);
     }
 }

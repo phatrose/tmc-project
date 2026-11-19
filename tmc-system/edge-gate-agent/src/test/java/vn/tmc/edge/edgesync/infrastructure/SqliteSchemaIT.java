@@ -26,14 +26,15 @@ class SqliteSchemaIT {
         try (var connection = database.open(); var statement = connection.createStatement()) {
             assertEquals("wal", scalar(connection, "PRAGMA journal_mode"));
             assertEquals("2", scalar(connection, "PRAGMA synchronous")); // FULL
-            assertEquals("3", scalar(connection, "PRAGMA user_version"));
+            assertEquals("4", scalar(connection, "PRAGMA user_version"));
             try (var tables = statement.executeQuery("SELECT name FROM sqlite_schema WHERE type = 'table'")) {
                 Set<String> names = new HashSet<>();
                 while (tables.next()) {
                     names.add(tables.getString(1));
                 }
                 assertTrue(names.containsAll(Set.of("edge_runtime_state", "local_events", "event_delivery",
-                        "local_replay_cache", "local_scan_outcomes", "local_gate_commands", "local_sync_batches")));
+                        "local_replay_cache", "local_scan_outcomes", "local_gate_commands", "local_sync_batches",
+                        "cached_revocations", "trusted_signing_keys", "cached_access_policy", "cached_gates")));
             }
         }
     }
@@ -48,7 +49,7 @@ class SqliteSchemaIT {
         var reopened = new SqliteDatabase(file);
         try (var connection = reopened.open()) {
             assertEquals("42", scalar(connection, "SELECT last_sequence_no FROM edge_runtime_state"));
-            assertEquals("3", scalar(connection, "PRAGMA user_version"));
+            assertEquals("4", scalar(connection, "PRAGMA user_version"));
         }
     }
 
@@ -68,7 +69,7 @@ class SqliteSchemaIT {
         }
         try (var connection = new SqliteDatabase(file).open()) {
             assertEquals("42", scalar(connection, "SELECT last_sequence_no FROM edge_runtime_state"));
-            assertEquals("3", scalar(connection, "PRAGMA user_version"));
+            assertEquals("4", scalar(connection, "PRAGMA user_version"));
             assertEquals("0", scalar(connection, "SELECT count(*) FROM local_sync_batches"));
         }
     }

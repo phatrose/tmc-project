@@ -15,14 +15,14 @@ import static vn.tmc.edge.edgesync.api.EventStoreException.Code.STORAGE_UNAVAILA
 
 /** Opens short-lived connections to a versioned Edge database. */
 final class SqliteDatabase {
-    private static final String[] MIGRATIONS = {"/schema.sql", "/schema-v2.sql", "/schema-v3.sql"};
+    private static final String[] MIGRATIONS = {"/schema.sql", "/schema-v2.sql", "/schema-v3.sql", "/schema-v4.sql"};
     private final String jdbcUrl;
 
     SqliteDatabase(Path file) {
         jdbcUrl = "jdbc:sqlite:" + Objects.requireNonNull(file).toAbsolutePath().toUri().toASCIIString();
         try (Connection connection = connect(); Statement statement = connection.createStatement()) {
             requireWal(statement, "PRAGMA journal_mode=WAL");
-            write(connection, db -> {
+            transaction(connection, "BEGIN IMMEDIATE", db -> {
                 migrate(db);
                 return null;
             });
@@ -60,17 +60,24 @@ final class SqliteDatabase {
     }
 
     <T> T write(Write<T> operation) {
+        return transaction("BEGIN IMMEDIATE", operation);
+    }
+
+    <T> T read(Write<T> operation) {
+        return transaction("BEGIN", operation);
+    }
+
+    private <T> T transaction(String begin, Write<T> operation) {
         try (Connection connection = open()) {
-            return write(connection, operation);
+            return transaction(connection, begin, operation);
         } catch (SQLException | IOException failure) {
             throw new EventStoreException(STORAGE_UNAVAILABLE, failure);
         }
     }
 
-    private static <T> T write(Connection connection, Write<T> operation) throws SQLException, IOException {
+    private static <T> T transaction(Connection connection, String begin, Write<T> operation) throws SQLException, IOException {
         try (Statement transaction = connection.createStatement()) {
-            // Reserve the writer before the first read so competing writers see the winner's commit.
-            transaction.execute("BEGIN IMMEDIATE");
+            transaction.execute(begin);
             try {
                 T result = operation.run(connection);
                 transaction.execute("COMMIT");
