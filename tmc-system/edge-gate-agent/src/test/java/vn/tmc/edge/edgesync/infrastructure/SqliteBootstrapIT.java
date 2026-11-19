@@ -64,6 +64,17 @@ class SqliteBootstrapIT {
     }
 
     @Test
+    void firstBootstrap_afterLocalEventInitializesTrustWithoutResettingSequence() {
+        var store = new SqliteStore(file(), clock);
+        SqliteBatchIT.append(store, EDGE_ID, "existing local event");
+        var cache = store.bootstrapCache(IDENTITY);
+        assertTrue(cache.snapshot().isEmpty());
+        assertEquals(APPLIED, cache.apply(full(clock.instant())));
+        assertEquals(1, cache.snapshot().orElseThrow().revision());
+        assertEquals(2, SqliteBatchIT.append(store, EDGE_ID, "after bootstrap").sequenceNo());
+    }
+
+    @Test
     void fullBootstrap_failureRollsBackAllCacheAndRevision() throws Exception {
         var cache = cache();
         installFault();

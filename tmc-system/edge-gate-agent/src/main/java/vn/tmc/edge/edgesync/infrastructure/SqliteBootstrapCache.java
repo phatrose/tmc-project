@@ -93,11 +93,9 @@ public final class SqliteBootstrapCache implements BootstrapCache {
                 if (!identity.factoryId().toString().equals(row.getString("factory_id"))) {
                     throw new SQLException("Stored Edge factory differs from provisioned identity");
                 }
-                Long generatedAt = row.getObject("bootstrap_generated_at", Long.class);
-                Long trustedUntil = row.getObject("bootstrap_trusted_until", Long.class);
                 return new Metadata(row.getLong("bootstrap_revision"),
-                        generatedAt == null ? null : Instant.ofEpochMilli(generatedAt),
-                        trustedUntil == null ? null : Instant.ofEpochMilli(trustedUntil),
+                        SqliteTime.nullableInstant(row, "bootstrap_generated_at"),
+                        SqliteTime.nullableInstant(row, "bootstrap_trusted_until"),
                         row.getString("bootstrap_snapshot_hash"));
             }
         }
