@@ -16,7 +16,12 @@ import vn.tmc.edge.edgesync.api.ScanInputFingerprint;
 import vn.tmc.edge.edgesync.api.ScanOutcome;
 import vn.tmc.edge.edgesync.domain.SyncJournal;
 import vn.tmc.edge.edgesync.domain.BootstrapCache;
+import vn.tmc.edge.edgesync.domain.BootstrapCache.Identity;
+import vn.tmc.edge.edgesync.domain.EdgeStatus.Queue;
+import vn.tmc.edge.edgesync.domain.OperationsJournal;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.Clock;
@@ -28,17 +33,49 @@ import java.util.UUID;
 import static vn.tmc.edge.edgesync.api.EventStoreException.Code.*;
 
 /** File-backed Edge event store. Each operation owns and closes its SQLite connection. */
-public final class SqliteStore implements LocalEventStorePort, SyncJournal {
+public final class SqliteStore implements LocalEventStorePort, SyncJournal, OperationsJournal {
     private final SqliteDatabase database;
     private final Clock clock;
+    private final Identity identity;
 
-    public SqliteStore(Path databaseFile, Clock clock) {
+    SqliteStore(Path databaseFile, Clock clock) {
+        this(new SqliteDatabase(databaseFile), clock, null);
+    }
+
+    private SqliteStore(SqliteDatabase database, Clock clock, Identity identity) {
         this.clock = Objects.requireNonNull(clock, "clock");
-        database = new SqliteDatabase(databaseFile);
+        this.database = database;
+        this.identity = identity;
+    }
+
+    /** Provisioning must supply a newly allocated Edge identity. Existing files are never overwritten. */
+    public static SqliteStore provisionNew(Path file, Clock clock, Identity newIdentity) {
+        Objects.requireNonNull(newIdentity);
+        Objects.requireNonNull(clock);
+        try {
+            Files.createFile(file);
+        } catch (IOException failure) {
+            throw new EventStoreException(STORAGE_UNAVAILABLE, failure);
+        }
+        new SqliteDatabase(file).write(db -> {
+            try (var statement = db.prepareStatement("INSERT INTO edge_runtime_state(edge_id, factory_id) VALUES (?, ?)")) {
+                statement.setString(1, newIdentity.edgeId().toString());
+                statement.setString(2, newIdentity.factoryId().toString());
+                statement.executeUpdate();
+            }
+            return null;
+        });
+        return openProvisioned(file, clock, newIdentity);
+    }
+
+    public static SqliteStore openProvisioned(Path file, Clock clock, Identity identity) {
+        Objects.requireNonNull(identity);
+        return new SqliteStore(new SqliteDatabase(file, identity), clock, identity);
     }
 
     @Override
     public CommittedEvent append(EventDraft draft) {
+        requireScope(draft.edgeId(), draft.factoryId());
         if (draft.payload() instanceof EventPayload.Attendance) {
             throw new IllegalArgumentException("Attendance requires reserveAndAppend");
         }
@@ -50,11 +87,7 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal {
     }
 
     public Optional<CommittedEvent> findEvent(UUID eventId) {
-        try (var connection = database.open()) {
-            return SqliteEvents.find(connection, eventId);
-        } catch (SQLException failure) {
-            throw new EventStoreException(STORAGE_UNAVAILABLE, failure);
-        }
+        return database.read(connection -> SqliteEvents.find(connection, eventId));
     }
 
     private Instant now() {
@@ -63,6 +96,7 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal {
 
     @Override
     public CommittedEvent reserveAndAppend(UUID scanId, EventDraft draft, ReplayReservation reservation) {
+        requireScope(draft.edgeId(), draft.factoryId());
         Objects.requireNonNull(scanId, "scanId");
         if (!scanId.equals(draft.correlationId())) {
             throw new IllegalArgumentException("The event correlationId must equal scanId");
@@ -108,11 +142,7 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal {
     public Optional<ScanOutcome> findScanOutcome(UUID scanId, ScanInputFingerprint fingerprint) {
         Objects.requireNonNull(scanId, "scanId");
         Objects.requireNonNull(fingerprint, "fingerprint");
-        try (var connection = database.open()) {
-            return SqliteScans.findOutcome(connection, scanId, fingerprint);
-        } catch (SQLException failure) {
-            throw new EventStoreException(STORAGE_UNAVAILABLE, failure);
-        }
+        return database.read(connection -> SqliteScans.findOutcome(connection, scanId, fingerprint));
     }
 
     private static AttendancePayload requireQrAttendance(EventDraft draft, ReplayReservation reservation) {
@@ -150,6 +180,9 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal {
     }
 
     public SyncBatchRequest pendingBatch(UUID edgeId, int maxEvents) {
+        if (edgeId != null) {
+            requireEdge(edgeId);
+        }
         if (maxEvents < 1 || maxEvents > SyncBatchRequest.MAX_EVENTS) {
             throw new IllegalArgumentException("Batch limits must be between 1 and 50");
         }
@@ -170,6 +203,7 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal {
 
     @Override
     public Attempt claim(UUID edgeId) {
+        requireEdge(edgeId);
         return database.write(connection -> SqliteSyncJournal.claim(connection, edgeId, now()));
     }
 
@@ -192,15 +226,13 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal {
 
     @Override
     public Schedule schedule(UUID edgeId) {
-        try (var connection = database.open()) {
-            return SqliteSyncJournal.schedule(connection, edgeId);
-        } catch (SQLException failure) {
-            throw new EventStoreException(STORAGE_UNAVAILABLE, failure);
-        }
+        requireEdge(edgeId);
+        return database.read(connection -> SqliteSyncJournal.schedule(connection, edgeId));
     }
 
     @Override
     public void resume(UUID edgeId) {
+        requireEdge(edgeId);
         database.write(connection -> {
             SqliteSyncJournal.resume(connection, edgeId);
             return null;
@@ -215,6 +247,44 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal {
     }
 
     public BootstrapCache bootstrapCache(BootstrapCache.Identity identity) {
-        return new SqliteBootstrapCache(database, Objects.requireNonNull(identity), clock);
+        requireScope(identity.edgeId(), identity.factoryId());
+        return new SqliteBootstrapCache(database, identity, clock);
+    }
+
+    @Override
+    public Queue queue(UUID edgeId) {
+        requireEdge(edgeId);
+        return database.read(connection -> SqliteOperations.queue(connection, edgeId));
+    }
+
+    @Override
+    public void recordCentralContact(UUID edgeId, Instant observedAt) {
+        requireEdge(edgeId);
+        database.write(connection -> {
+            SqliteOperations.recordContact(connection, edgeId, observedAt);
+            return null;
+        });
+    }
+
+    @Override
+    public void cleanup() {
+        database.write(connection -> {
+            SqliteOperations.cleanup(connection, now());
+            return null;
+        });
+    }
+
+    private void requireScope(UUID edgeId, UUID factoryId) {
+        requireEdge(edgeId);
+        if (identity != null && !identity.factoryId().equals(factoryId)) {
+            throw new IllegalArgumentException("Factory differs from the provisioned identity");
+        }
+    }
+
+    private void requireEdge(UUID edgeId) {
+        Objects.requireNonNull(edgeId, "edgeId");
+        if (identity != null && !identity.edgeId().equals(edgeId)) {
+            throw new IllegalArgumentException("Edge differs from the provisioned identity");
+        }
     }
 }

@@ -22,6 +22,8 @@ public interface LocalEventStorePort {
 
     /** Durably append a non-attendance event and initialize its delivery state. */
     CommittedEvent append(EventDraft draft);
+
+    /** maxEvents limits new batches. An active batch retains its original membership. */
     SyncBatchRequest pendingBatch(int maxEvents);
 
     void applyAcknowledgements(SyncBatchAck acknowledgement);
