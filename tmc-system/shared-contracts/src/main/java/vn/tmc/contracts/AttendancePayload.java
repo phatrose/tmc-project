@@ -1,5 +1,7 @@
 package vn.tmc.contracts;
 
+import java.time.Instant;
+
 /**
  * KHUNG TRIỂN KHAI — có khai báo, chưa hiện thực nghiệp vụ.
  * PHỤ TRÁCH: Task 3.
@@ -15,7 +17,8 @@ package vn.tmc.contracts;
  * - Cần làm: MANUAL cần operatorId/reason; chốt nullability jti/kid theo nguồn. Kết quả lệnh cổng là EVT-03 riêng.
  * - Lưu ý bàn giao: Giữ nguyên dữ kiện sau commit; không trộn ACK đồng bộ hoặc trạng thái thiết bị vào payload này.
  */
-public record AttendancePayload(String employeeId, Direction direction, Source source, String jti, String kid, String commandId, String operatorId, String reason) {
+public record AttendancePayload(String employeeId, Direction direction, Source source, String jti, String kid,
+                                Instant tokenIssuedAt, String commandId, String operatorId, String reason) {
     public enum Direction { IN, OUT }
     public enum Source { ONLINE, OFFLINE, MANUAL }
 }
