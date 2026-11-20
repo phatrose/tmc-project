@@ -18,6 +18,12 @@ public interface LocalEventStorePort {
      */
     CommittedEvent reserveAndAppend(UUID scanId, EventDraft draft, ReplayReservation reservation);
 
+    /**
+     * Persists an authorized EMERGENCY command and verified ACTION reservation without an event.
+     * Only the first successful commit returns a new command.
+     */
+    CommittedCommand commitEmergency(UUID scanId, CommandIntent command, ReplayReservation reservation);
+
     /** Look up a retry before credential verification. A changed input raises IDEMPOTENCY_CONFLICT. */
     Optional<ScanOutcome> findScanOutcome(UUID scanId, ScanInputFingerprint fingerprint);
 

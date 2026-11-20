@@ -4,6 +4,7 @@ import vn.tmc.contracts.AttendancePayload;
 import vn.tmc.contracts.SyncBatchAck;
 import vn.tmc.contracts.SyncBatchRequest;
 import vn.tmc.edge.edgesync.api.CommandIntent;
+import vn.tmc.edge.edgesync.api.CommittedCommand;
 import vn.tmc.edge.edgesync.api.CommittedEvent;
 import vn.tmc.edge.edgesync.api.EventDraft;
 import vn.tmc.edge.edgesync.api.EventPayload;
@@ -103,12 +104,10 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal, Oper
         }
         Objects.requireNonNull(reservation, "reservation");
         return database.write(connection -> {
-            var previous = SqliteScans.findOutcome(connection, scanId, reservation.inputFingerprint());
+            var previous = SqliteScans.findRetry(connection, scanId, reservation.inputFingerprint(), draft.gateId(),
+                    ScanOutcome.Decision.ALLOW);
             if (previous.isPresent()) {
                 var outcome = previous.orElseThrow();
-                if (!outcome.gateId().equals(draft.gateId())) {
-                    throw new EventStoreException(IDEMPOTENCY_CONFLICT);
-                }
                 if (outcome.eventId() == null) {
                     throw new SQLException("Stored scan has no committed event");
                 }
@@ -119,9 +118,7 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal, Oper
             var attendance = requireAttendance(draft, reservation);
             var command = attendanceCommand(draft.gateId(), attendance, reservation);
             // A reused jti is REPLAY even when the same employee also matches the business window.
-            if (SqliteScans.hasReplay(connection, reservation)) {
-                throw new EventStoreException(REPLAY);
-            }
+            SqliteScans.rejectReplay(connection, reservation);
             Instant now = now();
             if (SqliteScans.hasRecentAllow(connection, reservation, draft.occurredAt())) {
                 throw new EventStoreException(DUPLICATE_SCAN);
@@ -132,10 +129,41 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal, Oper
             UUID eventId = event.envelope().eventId();
             SqliteScans.linkEvent(connection, reservation, eventId);
             var mode = attendance.source() == AttendancePayload.Source.OFFLINE ? ScanMode.OFFLINE : ScanMode.ONLINE;
-            SqliteScans.insertAllow(connection, scanId, reservation, mode,
+            SqliteScans.insertCommand(connection, scanId, reservation, mode,
                     draft.occurredAt(), eventId, command, now);
             SqliteEvents.advanceSequence(connection, event.envelope());
             return new CommittedEvent(event.envelope(), event.committedAt(), Optional.of(command));
+        });
+    }
+
+    @Override
+    public CommittedCommand commitEmergency(UUID scanId, CommandIntent command, ReplayReservation reservation) {
+        requireUuidV4(scanId, "scanId");
+        Objects.requireNonNull(command, "command");
+        Objects.requireNonNull(reservation, "reservation");
+        return database.write(connection -> {
+            var previous = SqliteScans.findRetry(connection, scanId, reservation.inputFingerprint(), command.gateId(),
+                    ScanOutcome.Decision.EMERGENCY);
+            if (previous.isPresent()) {
+                var outcome = previous.orElseThrow();
+                if (outcome.commandId() == null || outcome.eventId() != null) {
+                    throw new SQLException("Stored emergency scan has an invalid command outcome");
+                }
+                return new CommittedCommand(outcome.commandId(), outcome.occurredAt(), Optional.empty());
+            }
+
+            if (command.mode() != CommandMode.EMERGENCY || reservation.kind() != ReplayReservation.Kind.ACTION
+                    || reservation.employeeId() != null || !reservation.gateId().equals(command.gateId())) {
+                throw new IllegalArgumentException("EMERGENCY requires a matching ACTION reservation without an employee");
+            }
+            requireUuidV4(command.commandId(), "commandId");
+            requireUuidV4(command.operatorId(), "operatorId");
+            requireOverrideReason(command.reason());
+            SqliteScans.rejectReplay(connection, reservation);
+            Instant now = now();
+            SqliteScans.reserve(connection, reservation, now);
+            SqliteScans.insertCommand(connection, scanId, reservation, ScanMode.ONLINE, now, null, command, now);
+            return new CommittedCommand(command.commandId(), now, Optional.of(command));
         });
     }
 

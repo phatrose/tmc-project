@@ -8,6 +8,8 @@ import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import vn.tmc.contracts.AttendancePayload;
+import vn.tmc.edge.edgesync.api.CommandIntent;
+import vn.tmc.edge.edgesync.api.CommittedCommand;
 import vn.tmc.edge.edgesync.api.CommittedEvent;
 import vn.tmc.edge.edgesync.api.EventDraft;
 import vn.tmc.edge.edgesync.api.EventPayload;
@@ -65,7 +67,7 @@ class SqliteOverridesIT {
         assertCounts(1, 1);
         assertEquals("ACTION", read("SELECT kind FROM local_replay_cache"));
         assertEquals(JTI.toString(), read("SELECT jti FROM local_replay_cache"));
-        assertEquals(EXPIRY.plusSeconds(5).toEpochMilli() + "", read("SELECT purge_after FROM local_replay_cache"));
+        assertEquals(Long.toString(EXPIRY.plusSeconds(5).toEpochMilli()), read("SELECT purge_after FROM local_replay_cache"));
         assertEquals(committed.envelope().eventId().toString(), read("SELECT event_id FROM local_replay_cache"));
         assertEquals("PENDING", read("SELECT state FROM event_delivery"));
         assertEquals(grant.inputFingerprint().sha256(), read("SELECT input_fingerprint FROM local_scan_outcomes"));
@@ -210,6 +212,159 @@ class SqliteOverridesIT {
         assertEquals("RECOVERY_UNKNOWN", read("SELECT code FROM local_gate_commands"));
         assertEquals(REASON, read("SELECT reason FROM local_gate_commands"));
         assertCounts(1, 1);
+    }
+
+    @Test
+    void commitEmergency_persistsActionReplayScanAndCommandWithoutAttendance() throws Exception {
+        var grant = emergencyGrant(JTI, REASON);
+        var committed = emergency(store, SCAN_ID, COMMAND_ID, grant, REASON);
+        assertEquals(COMMAND_ID, committed.commandId());
+        assertEquals(COMMITTED_AT, committed.committedAt());
+        assertEquals(new CommandIntent(COMMAND_ID, GATE_ID, OPERATOR, REASON, CommandMode.EMERGENCY),
+                committed.newCommand().orElseThrow());
+        assertCounts(0, 1);
+        assertEquals("ACTION", read("SELECT kind FROM local_replay_cache"));
+        assertEquals(JTI.toString(), read("SELECT jti FROM local_replay_cache"));
+        assertEquals(Long.toString(EXPIRY.plusSeconds(5).toEpochMilli()), read("SELECT purge_after FROM local_replay_cache"));
+        assertNull(read("SELECT employee_id FROM local_replay_cache"));
+        assertNull(read("SELECT event_id FROM local_replay_cache"));
+        assertNull(read("SELECT employee_id FROM local_scan_outcomes"));
+        assertEquals(grant.inputFingerprint().sha256(), read("SELECT input_fingerprint FROM local_scan_outcomes"));
+        assertEquals("EMERGENCY", read("SELECT mode FROM local_gate_commands"));
+        assertEquals(OPERATOR.toString(), read("SELECT operator_id FROM local_gate_commands"));
+        assertEquals(REASON, read("SELECT reason FROM local_gate_commands"));
+        var outcome = store.findScanOutcome(SCAN_ID, grant.inputFingerprint()).orElseThrow();
+        assertEquals(ScanOutcome.Decision.EMERGENCY, outcome.decision());
+        assertEquals("EMERGENCY", outcome.reasonCode());
+        assertEquals(EventPayload.CommandStatus.NOT_SENT, outcome.commandStatus());
+        assertEquals(GATE_ID, outcome.gateId());
+        assertEquals(COMMAND_ID, outcome.commandId());
+        assertNull(outcome.eventId());
+        assertNull(store.pendingBatch(50));
+    }
+
+    @Test
+    void commitEmergency_doesNotConsumeAttendanceSequence() throws Exception {
+        qr(SCAN_ID, COMMAND_ID, OCCURRED_AT);
+        emergency(store, fixtureId(302), fixtureId(303), emergencyGrant(fixtureId(304), REASON), REASON);
+        assertEquals("1", read("SELECT last_sequence_no FROM edge_runtime_state"));
+        assertEquals(2, manual(store, fixtureId(305), fixtureId(306), OCCURRED_AT.plusSeconds(30),
+                manualGrant(fixtureId(307), REASON)).envelope().sequenceNo());
+        assertCounts(2, 3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"kind", "employee", "gate", "mode", "operator", "reason", "command"})
+    void emergency_rejectsMalformedActionAndIntent(String invalid) throws Exception {
+        var grant = switch (invalid) {
+            case "kind" -> qrReservation(JTI);
+            case "employee" -> manualGrant(JTI, REASON);
+            default -> emergencyGrant(JTI, REASON);
+        };
+        var command = new CommandIntent(invalid.equals("command") ? UUID.fromString("00000000-0000-0000-0000-000000000000")
+                        : COMMAND_ID, invalid.equals("gate") ? fixtureId(304) : GATE_ID,
+                invalid.equals("operator") ? null : OPERATOR, invalid.equals("reason") ? null : REASON,
+                invalid.equals("mode") ? CommandMode.MANUAL : CommandMode.EMERGENCY);
+        assertThrows(IllegalArgumentException.class, () -> store.commitEmergency(SCAN_ID, command, grant));
+        assertCounts(0, 0);
+    }
+
+    @Test
+    void sameEmergencyActionJti_isReplay() throws Exception {
+        var grant = emergencyGrant(JTI, REASON);
+        emergency(store, SCAN_ID, COMMAND_ID, grant, REASON);
+        assertRejected(Code.REPLAY, () -> emergency(store, fixtureId(302), fixtureId(303), grant, REASON));
+        assertCounts(0, 1);
+    }
+
+    @Test
+    void concurrentSameEmergencyActionJti_exactlyOneWins() throws Exception {
+        var other = reopen();
+        var grant = emergencyGrant(JTI, REASON);
+        assertOneWins(() -> emergency(store, SCAN_ID, COMMAND_ID, grant, REASON),
+                () -> emergency(other, fixtureId(302), fixtureId(303), grant, REASON));
+        assertCounts(0, 1);
+    }
+
+    @Test
+    void manualAndEmergency_shareTheActionReplayNamespace() throws Exception {
+        emergency(store, SCAN_ID, COMMAND_ID, emergencyGrant(JTI, REASON), REASON);
+        assertRejected(Code.REPLAY, () -> manual(store, fixtureId(302), fixtureId(303),
+                OCCURRED_AT, manualGrant(JTI, REASON)));
+        assertCounts(0, 1);
+    }
+
+    @Test
+    void sameEmergencyScanSameInput_returnsStoredOutcomeWithoutNewCommand() throws Exception {
+        var grant = emergencyGrant(JTI, REASON);
+        var first = emergency(store, SCAN_ID, COMMAND_ID, grant, REASON);
+        var outcome = store.findScanOutcome(SCAN_ID, grant.inputFingerprint()).orElseThrow();
+        var retry = emergency(store, SCAN_ID, fixtureId(303), grant, REASON);
+        assertEquals(first.commandId(), retry.commandId());
+        assertEquals(first.committedAt(), retry.committedAt());
+        assertTrue(retry.newCommand().isEmpty());
+        assertEquals(outcome, store.findScanOutcome(SCAN_ID, grant.inputFingerprint()).orElseThrow());
+        assertCounts(0, 1);
+    }
+
+    @Test
+    void sameEmergencyScanDifferentInput_isIdempotencyConflict() throws Exception {
+        emergency(store, SCAN_ID, COMMAND_ID, emergencyGrant(JTI, REASON), REASON);
+        assertRejected(Code.IDEMPOTENCY_CONFLICT, () -> emergency(store, SCAN_ID, COMMAND_ID,
+                emergencyGrant(JTI, CHANGED_REASON), CHANGED_REASON));
+        assertRejected(Code.IDEMPOTENCY_CONFLICT, () -> manual(store, SCAN_ID, COMMAND_ID, OCCURRED_AT,
+                manualGrant(JTI, REASON)));
+        assertEquals(REASON, read("SELECT reason FROM local_gate_commands"));
+        assertCounts(0, 1);
+    }
+
+    @Test
+    void emergencyCommitFailure_rollsBackEverything() throws Exception {
+        failCommit(CommandMode.EMERGENCY);
+        var grant = emergencyGrant(JTI, REASON);
+        assertRejected(Code.STORAGE_UNAVAILABLE, () -> emergency(store, SCAN_ID, COMMAND_ID, grant, REASON));
+        assertCounts(0, 0);
+        execute("DROP TRIGGER fail_override_commit");
+        assertTrue(emergency(store, SCAN_ID, COMMAND_ID, grant, REASON).newCommand().isPresent());
+        assertCounts(0, 1);
+    }
+
+    @Test
+    void restartAfterEmergencyCommit_doesNotMakeCommandEligibleAgain() throws Exception {
+        var grant = emergencyGrant(JTI, REASON);
+        var first = emergency(store, SCAN_ID, COMMAND_ID, grant, REASON);
+        var restarted = reopen();
+        var retry = emergency(restarted, SCAN_ID, fixtureId(303), grant, REASON);
+        assertEquals(first.committedAt(), retry.committedAt());
+        assertEquals(COMMAND_ID, retry.commandId());
+        assertTrue(retry.newCommand().isEmpty());
+        assertCounts(0, 1);
+    }
+
+    @Test
+    void recoveryOfUncertainEmergencyCommand_marksTimeoutAndNeverUnlocksAgain() throws Exception {
+        var grant = emergencyGrant(JTI, REASON);
+        emergency(store, SCAN_ID, COMMAND_ID, grant, REASON);
+        var restarted = reopen();
+        restarted.recover();
+        var retry = emergency(restarted, SCAN_ID, fixtureId(303), grant, REASON);
+        assertTrue(retry.newCommand().isEmpty());
+        assertEquals(EventPayload.CommandStatus.TIMEOUT,
+                restarted.findScanOutcome(SCAN_ID, grant.inputFingerprint()).orElseThrow().commandStatus());
+        assertEquals("TIMEOUT", read("SELECT status FROM local_gate_commands"));
+        assertEquals("RECOVERY_UNKNOWN", read("SELECT code FROM local_gate_commands"));
+        assertCounts(0, 1);
+    }
+
+    private static ReplayReservation emergencyGrant(UUID jti, String reason) {
+        return new ReplayReservation(ReplayReservation.Kind.ACTION, jti, EXPIRY, null, null,
+                GATE_ID, ScanInputFingerprint.ofAction(GATE_ID, CommandMode.EMERGENCY, null, reason, GRANT));
+    }
+
+    private static CommittedCommand emergency(LocalEventStorePort port, UUID scanId, UUID commandId,
+                                              ReplayReservation grant, String reason) {
+        return port.commitEmergency(scanId, new CommandIntent(commandId, GATE_ID, OPERATOR, reason,
+                CommandMode.EMERGENCY), grant);
     }
 
     private CommittedEvent qr(UUID scanId, UUID commandId, Instant at) {
