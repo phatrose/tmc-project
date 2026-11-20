@@ -12,12 +12,13 @@ import java.util.UUID;
  */
 public interface LocalEventStorePort {
     /**
-     * Commits an already verified QR ALLOW atomically.
+     * Commits an authorized QR or MANUAL attendance ALLOW atomically.
+     * QR uses a QR reservation and MANUAL uses an ACTION reservation.
      * Send a device command only from the returned newCommand, which is empty on retries.
      */
     CommittedEvent reserveAndAppend(UUID scanId, EventDraft draft, ReplayReservation reservation);
 
-    /** Look up a retry before QR verification. A changed input raises IDEMPOTENCY_CONFLICT. */
+    /** Look up a retry before credential verification. A changed input raises IDEMPOTENCY_CONFLICT. */
     Optional<ScanOutcome> findScanOutcome(UUID scanId, ScanInputFingerprint fingerprint);
 
     /** Durably append a non-attendance event and initialize its delivery state. */

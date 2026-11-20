@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Verified claims and local scan context. For QR tokens expiresAt is the signed exp. */
+/** Verified claims and local scan context. expiresAt is the signed QR or ACTION expiry. */
 public record ReplayReservation(Kind kind, UUID jti, Instant expiresAt, UUID employeeId, Direction direction,
                                 UUID gateId, ScanInputFingerprint inputFingerprint) {
     public enum Kind { QR, ACTION }

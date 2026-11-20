@@ -116,8 +116,8 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal, Oper
                         .orElseThrow(() -> new SQLException("Stored scan event is missing"));
             }
 
-            var attendance = requireQrAttendance(draft, reservation);
-            var command = qrCommand(draft.gateId(), attendance.commandId());
+            var attendance = requireAttendance(draft, reservation);
+            var command = attendanceCommand(draft.gateId(), attendance, reservation);
             // A reused jti is REPLAY even when the same employee also matches the business window.
             if (SqliteScans.hasReplay(connection, reservation)) {
                 throw new EventStoreException(REPLAY);
@@ -127,11 +127,12 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal, Oper
                 throw new EventStoreException(DUPLICATE_SCAN);
             }
 
-            SqliteScans.reserveQr(connection, reservation, now);
+            SqliteScans.reserve(connection, reservation, now);
             var event = SqliteEvents.insert(connection, draft, now);
             UUID eventId = event.envelope().eventId();
-            SqliteScans.linkQrEvent(connection, reservation.jti(), eventId);
-            SqliteScans.insertAllow(connection, scanId, reservation, ScanMode.valueOf(attendance.source().name()),
+            SqliteScans.linkEvent(connection, reservation, eventId);
+            var mode = attendance.source() == AttendancePayload.Source.OFFLINE ? ScanMode.OFFLINE : ScanMode.ONLINE;
+            SqliteScans.insertAllow(connection, scanId, reservation, mode,
                     draft.occurredAt(), eventId, command, now);
             SqliteEvents.advanceSequence(connection, event.envelope());
             return new CommittedEvent(event.envelope(), event.committedAt(), Optional.of(command));
@@ -145,33 +146,66 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal, Oper
         return database.read(connection -> SqliteScans.findOutcome(connection, scanId, fingerprint));
     }
 
-    private static AttendancePayload requireQrAttendance(EventDraft draft, ReplayReservation reservation) {
-        if (!(draft.payload() instanceof EventPayload.Attendance payload)
-                || reservation.kind() != ReplayReservation.Kind.QR) {
-            throw new IllegalArgumentException("This transaction requires QR attendance and a QR reservation");
+    private static AttendancePayload requireAttendance(EventDraft draft, ReplayReservation reservation) {
+        if (!(draft.payload() instanceof EventPayload.Attendance payload)) {
+            throw new IllegalArgumentException("This transaction requires attendance");
         }
         var attendance = payload.value();
-        if (attendance.source() == null || attendance.source() == AttendancePayload.Source.MANUAL
-                || attendance.kid() == null || attendance.kid().isBlank() || attendance.tokenIssuedAt() == null
-                || attendance.operatorId() != null || attendance.reason() != null
-                || !reservation.jti().toString().equals(attendance.jti())
+        if (attendance.source() == null
                 || reservation.employeeId() == null || !reservation.employeeId().toString().equals(attendance.employeeId())
                 || reservation.direction() == null || reservation.direction() != attendance.direction()
                 || !reservation.gateId().equals(draft.gateId())) {
-            throw new IllegalArgumentException("QR attendance and replay reservation must describe the same verified scan");
+            throw new IllegalArgumentException("Attendance and replay reservation must describe the same verified scan");
         }
         return attendance;
     }
 
-    private static CommandIntent qrCommand(UUID gateId, String suppliedId) {
-        if (suppliedId == null) {
-            throw new IllegalArgumentException("commandId is required");
+    private static CommandIntent attendanceCommand(UUID gateId, AttendancePayload attendance, ReplayReservation reservation) {
+        UUID commandId = requireUuidV4(attendance.commandId(), "commandId");
+        if (attendance.source() == AttendancePayload.Source.MANUAL) {
+            if (reservation.kind() != ReplayReservation.Kind.ACTION || attendance.jti() != null
+                    || attendance.kid() != null || attendance.tokenIssuedAt() != null) {
+                throw new IllegalArgumentException("MANUAL attendance requires an ACTION reservation and null QR fields");
+            }
+            requireUuidV4(reservation.employeeId(), "employeeId");
+            return new CommandIntent(commandId, gateId, requireUuidV4(attendance.operatorId(), "operatorId"),
+                    requireOverrideReason(attendance.reason()), CommandMode.MANUAL);
         }
-        UUID commandId = UUID.fromString(suppliedId);
-        if (commandId.version() != 4 || commandId.variant() != 2 || !commandId.toString().equals(suppliedId)) {
-            throw new IllegalArgumentException("commandId must be a lowercase UUIDv4");
+        if (reservation.kind() != ReplayReservation.Kind.QR || attendance.kid() == null || attendance.kid().isBlank()
+                || attendance.tokenIssuedAt() == null || attendance.operatorId() != null || attendance.reason() != null
+                || !reservation.jti().toString().equals(attendance.jti())) {
+            throw new IllegalArgumentException("QR attendance requires matching QR claims and null operator fields");
         }
         return new CommandIntent(commandId, gateId, null, null, CommandMode.QR);
+    }
+
+    private static UUID requireUuidV4(String value, String field) {
+        if (value == null) {
+            throw new IllegalArgumentException(field + " is required");
+        }
+        UUID id = requireUuidV4(UUID.fromString(value), field);
+        if (!id.toString().equals(value)) {
+            throw new IllegalArgumentException(field + " must be a lowercase UUIDv4");
+        }
+        return id;
+    }
+
+    private static UUID requireUuidV4(UUID id, String field) {
+        if (id == null || id.version() != 4 || id.variant() != 2) {
+            throw new IllegalArgumentException(field + " must be a UUIDv4");
+        }
+        return id;
+    }
+
+    private static String requireOverrideReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("Override reason is required");
+        }
+        int length = reason.codePointCount(0, reason.length());
+        if (length < 10 || length > 500) {
+            throw new IllegalArgumentException("Override reason must contain 10 to 500 characters");
+        }
+        return reason;
     }
 
     @Override

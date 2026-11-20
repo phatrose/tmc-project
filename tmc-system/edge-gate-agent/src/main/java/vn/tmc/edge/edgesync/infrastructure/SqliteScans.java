@@ -80,30 +80,33 @@ final class SqliteScans {
         }
     }
 
-    static void reserveQr(Connection connection, ReplayReservation reservation, Instant now) throws SQLException {
+    static void reserve(Connection connection, ReplayReservation reservation, Instant now) throws SQLException {
         try (var statement = connection.prepareStatement("""
                 INSERT INTO local_replay_cache (kind, jti, expires_at, employee_id, direction, gate_id, reserved_at, purge_after)
-                VALUES ('QR', ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """)) {
-            statement.setString(1, reservation.jti().toString());
-            statement.setLong(2, reservation.expiresAt().toEpochMilli());
-            statement.setString(3, reservation.employeeId().toString());
-            statement.setString(4, reservation.direction().name());
-            statement.setString(5, reservation.gateId().toString());
-            statement.setLong(6, now.toEpochMilli());
-            statement.setLong(7, reservation.expiresAt().plusSeconds(5).toEpochMilli());
+            statement.setString(1, reservation.kind().name());
+            statement.setString(2, reservation.jti().toString());
+            statement.setLong(3, reservation.expiresAt().toEpochMilli());
+            statement.setString(4, reservation.employeeId() == null ? null : reservation.employeeId().toString());
+            statement.setString(5, reservation.direction() == null ? null : reservation.direction().name());
+            statement.setString(6, reservation.gateId().toString());
+            statement.setLong(7, now.toEpochMilli());
+            // ACTION grants use the same expiry skew as QR credentials.
+            statement.setLong(8, reservation.expiresAt().plusSeconds(5).toEpochMilli());
             statement.executeUpdate();
         }
     }
 
-    static void linkQrEvent(Connection connection, UUID jti, UUID eventId) throws SQLException {
+    static void linkEvent(Connection connection, ReplayReservation reservation, UUID eventId) throws SQLException {
         try (var statement = connection.prepareStatement("""
-                UPDATE local_replay_cache SET event_id = ? WHERE kind = 'QR' AND jti = ?
+                UPDATE local_replay_cache SET event_id = ? WHERE kind = ? AND jti = ?
                 """)) {
             statement.setString(1, eventId.toString());
-            statement.setString(2, jti.toString());
+            statement.setString(2, reservation.kind().name());
+            statement.setString(3, reservation.jti().toString());
             if (statement.executeUpdate() != 1) {
-                throw new SQLException("QR reservation did not link to its event");
+                throw new SQLException("Replay reservation did not link to its event");
             }
         }
     }
@@ -129,13 +132,17 @@ final class SqliteScans {
             statement.executeUpdate();
         }
         try (var statement = connection.prepareStatement("""
-                INSERT INTO local_gate_commands (command_id, scan_id, gate_id, mode, status, retain_until)
-                VALUES (?, ?, ?, 'QR', 'NOT_SENT', ?)
+                INSERT INTO local_gate_commands
+                    (command_id, scan_id, gate_id, mode, operator_id, reason, status, retain_until)
+                VALUES (?, ?, ?, ?, ?, ?, 'NOT_SENT', ?)
                 """)) {
             statement.setString(1, command.commandId().toString());
             statement.setString(2, scanId.toString());
             statement.setString(3, command.gateId().toString());
-            statement.setLong(4, retainUntil);
+            statement.setString(4, command.mode().name());
+            statement.setString(5, command.operatorId() == null ? null : command.operatorId().toString());
+            statement.setString(6, command.reason());
+            statement.setLong(7, retainUntil);
             statement.executeUpdate();
         }
     }
