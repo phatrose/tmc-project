@@ -1,2 +1,13 @@
-// PHỤ TRÁCH: Task 8. TODO: HTTPS/proxy theo API contract khi có backend.
-export default {};
+// PHỤ TRÁCH: Task 8. Dev proxy cùng origin; production dùng reverse proxy/TLS riêng.
+import { defineConfig, loadEnv } from 'vite';
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  return {
+    server: {
+      host: '127.0.0.1',
+      port: 5173,
+      strictPort: true,
+      proxy: { '/api': { target: env.TMC_CENTRAL_URL || 'http://127.0.0.1:8080', changeOrigin: true } },
+    },
+  };
+});
