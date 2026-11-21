@@ -1,0 +1,14 @@
+**/target
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.db*
+**/*.log
+.git
+.cache
+docs/reference
+tests/evidence

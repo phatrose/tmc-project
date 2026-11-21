@@ -1,0 +1,40 @@
+# PHỤ TRÁCH: Task 8. Môi trường local thật (PostgreSQL), không mock hoặc bypass auth.
+name: tmc
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tmc
+      POSTGRES_USER: ${TMC_DB_USER:-tmc}
+      POSTGRES_PASSWORD: ${TMC_DB_PASSWORD:?Set TMC_DB_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d tmc']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  central:
+    build:
+      context: .
+      dockerfile: central-backend/Dockerfile
+    environment:
+      TMC_DB_URL: jdbc:postgresql://postgres:5432/tmc
+      TMC_DB_USER: ${TMC_DB_USER:-tmc}
+      TMC_DB_PASSWORD: ${TMC_DB_PASSWORD:?Set TMC_DB_PASSWORD in .env}
+    ports:
+      - '127.0.0.1:8080:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - '127.0.0.1:5173:8080'
+    depends_on:
+      central:
+        condition: service_healthy
+volumes:
+  postgres-data:

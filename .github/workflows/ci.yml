@@ -1,0 +1,65 @@
+# PHỤ TRÁCH: Task 8. Chỉ file workflow; chưa chạy/publish trên GitHub trong phiên này.
+name: TMC verification
+on:
+  push:
+    branches: [main, 'task-*/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  java:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tmc-system
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - run: mvn -B -ntp verify -Pintegration
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: java-test-results
+          path: |
+            tmc-system/**/target/surefire-reports/
+            tmc-system/**/target/failsafe-reports/
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tmc-system/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tmc-system/frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+  compose:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tmc-system
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Start isolated integration environment
+        run: |
+          echo "TMC_DB_PASSWORD=$(openssl rand -hex 24)" > .env
+          docker compose config --quiet
+          docker compose up --build --wait --wait-timeout 240
+      - name: Verify platform and frontend proxy
+        run: node tests/platform-smoke.mjs
+      - name: Stop isolated environment
+        if: always()
+        run: docker compose down --volumes

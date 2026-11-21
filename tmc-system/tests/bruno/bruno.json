@@ -1,0 +1,6 @@
+{
+  "version": "1",
+  "name": "TMC platform verification",
+  "type": "collection",
+  "ignore": ["node_modules", ".git"]
+}
