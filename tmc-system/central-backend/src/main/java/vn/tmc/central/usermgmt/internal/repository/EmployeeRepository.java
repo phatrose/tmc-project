@@ -1,15 +1,27 @@
 package vn.tmc.central.usermgmt.internal.repository;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.stereotype.Repository;
 import vn.tmc.central.usermgmt.internal.model.Employee;
+
+import java.util.List;
 import java.util.Optional;
 
-/** PHỤ TRÁCH: Task 1. TODO: Hoàn thiện contract và nghiệp vụ theo PDF.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Port truy cập dữ liệu cho model tương ứng; implementation persistence sẽ được bổ sung sau.
- * - Cần làm: Chốt cách xử lý ID không tồn tại, transaction và truy vấn có scope; findById trả Optional, save không được âm thầm bỏ lỗi.
- * - Lưu ý bàn giao: Đặt JPA mapping/SQL trong adapter, không để service module khác gọi repository trực tiếp; viết test DB thật.
+/**
+ * PHỤ TRÁCH: Task 1.
+ * Repository truy xuất nhân viên qua Spring Data JPA theo CONTRACT-V1.md §4.
  */
-public interface EmployeeRepository {
-    Optional<Employee> findById(String id);
-    void save(Employee value);
+@Repository
+public interface EmployeeRepository extends JpaRepository<Employee, String>, JpaSpecificationExecutor<Employee> {
+
+    List<Employee> findByFactoryId(String factoryId);
+
+    Page<Employee> findByFactoryId(String factoryId, Pageable pageable);
+
+    boolean existsByEmployeeCode(String code);
+
+    Optional<Employee> findByEmployeeCode(String code);
 }
