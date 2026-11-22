@@ -1,23 +1,45 @@
 package vn.tmc.edge.edgesync.application;
 
-/**
- * KHUNG TRIỂN KHAI — có khai báo, chưa hiện thực nghiệp vụ.
- * PHỤ TRÁCH: Task 7.
- * VAI TRÒ: Use case / worker.
- * NGUỒN: main.pdf, §6.2.2; FR-GS-04; FR-SA-04.
- * TÀI LIỆU PDF: docs/tasks/06-edge-offline.md; docs/REQUIREMENTS.md.
- * TODO[Task 7]: Theo dõi WAN/heartbeat và backlog ở nền; source phản ánh thời điểm tạo event.
- * TODO[Task 7]: Không ping Central đồng bộ trong mỗi lượt quét để quyết định ONLINE/OFFLINE.
- * PHỐI HỢP: Task 2, Task 3, Task 6, Task 8.
- * Kiểu dữ liệu là khung đề xuất; chốt contract trước khi tích hợp runtime.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Theo dõi kết nối và lỗi nền để cung cấp trạng thái WAN cho worker/UI.
- * - Cần làm: Bổ sung timeout, thời gian quan sát và trạng thái chưa biết; không suy ra online chỉ từ một lần ping.
- * - Lưu ý bàn giao: Không ping Central đồng bộ trong mỗi lượt quét; source của event phản ánh lúc event được tạo.
- */
+import vn.tmc.edge.edgesync.api.EventPayload.ScanMode;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+
+/** Uses successful background interactions observed by this process. */
 public final class ConnectivityMonitor {
+    private static final Duration ONLINE_WINDOW = Duration.ofSeconds(60);
+    private final Clock clock;
+    private final Consumer<Instant> saveContact;
+    private final AtomicReference<Instant> latest = new AtomicReference<>();
+
+    public ConnectivityMonitor(Clock clock, Consumer<Instant> saveContact) {
+        this.clock = Objects.requireNonNull(clock);
+        this.saveContact = Objects.requireNonNull(saveContact);
+    }
+
+    public void recordSuccess() {
+        Instant at = Instant.ofEpochMilli(clock.millis());
+        saveContact.accept(at);
+        latest.accumulateAndGet(at, (previous, observed) ->
+                previous == null || observed.isAfter(previous) ? observed : previous);
+    }
+
+    public Instant lastSuccessfulContact() {
+        return latest.get();
+    }
+
+    public ScanMode mode() {
+        var last = latest.get();
+        var now = clock.instant();
+        return last != null && !now.isBefore(last) && now.isBefore(last.plus(ONLINE_WINDOW))
+                ? ScanMode.ONLINE : ScanMode.OFFLINE;
+    }
 
     public boolean isOnline() {
-        throw new UnsupportedOperationException("TODO: isOnline");
+        return mode() == ScanMode.ONLINE;
     }
 }
