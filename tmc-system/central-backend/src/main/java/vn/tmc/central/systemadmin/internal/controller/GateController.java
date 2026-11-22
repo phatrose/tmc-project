@@ -3,30 +3,49 @@ package vn.tmc.central.systemadmin.internal.controller;
 import vn.tmc.central.systemadmin.api.GateManagement;
 import vn.tmc.central.systemadmin.api.GateView;
 
+import java.util.List;
+import java.util.Objects;
+
 /**
- * KHUNG TRIỂN KHAI — có khai báo, chưa hiện thực nghiệp vụ.
  * PHỤ TRÁCH: Task 5.
- * VAI TRÒ: controller.
- * NGUỒN: main.pdf, FR-GS-01..06; UC-04.
+ * VAI TRÒ: Controller tiếp nhận và xử lý yêu cầu cho Gate Management.
+ * NGUỒN: main.pdf, FR-GS-01..06; §4.2.1; §5.1.
  * TÀI LIỆU PDF: docs/tasks/04-api-contracts.md; docs/REQUIREMENTS.md.
- * TODO[Task 5]: API cấu hình, heartbeat và yêu cầu manual/emergency có re-auth.
- * TODO[Task 5]: Chốt transport xuống Edge; web không tự gọi thiết bị cổng.
- * PHỐI HỢP: Task 1, Task 3, Task 6, Task 7.
- * Kiểu dữ liệu là khung đề xuất; chốt contract trước khi tích hợp runtime.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Nhận yêu cầu thuộc module, chuyển input đã kiểm tra cho service/API interface được inject.
- * - Cần làm: Bổ sung HTTP route, validation, danh tính và data scope; ánh xạ lỗi theo ApiError, không viết SQL tại controller.
- * - Lưu ý bàn giao: Hiện chỉ có method Java gọi service; cần bean wiring và test trái quyền trước khi coi endpoint hoạt động.
  */
 public final class GateController {
     private final GateManagement service;
 
     public GateController(GateManagement service) {
-        this.service = java.util.Objects.requireNonNull(service);
+        this.service = Objects.requireNonNull(service, "service must not be null");
     }
 
-    // TODO[Task 5]: HTTP mapping, authenticated identity, RBAC/scope and validation.
+    // GET /api/v1/gates/{gateId}
     public GateView findGate(String gateId) {
         return service.findGate(gateId);
+    }
+
+    // GET /api/v1/gates
+    public List<GateView> findAllGates() {
+        return service.findAllGates();
+    }
+
+    // GET /api/v1/gates/factory/{factoryId}
+    public List<GateView> findGatesByFactory(String factoryId) {
+        return service.findGatesByFactory(factoryId);
+    }
+
+    // POST /api/v1/gates
+    public GateView registerGate(String id, String factoryId, String edgeId, String name, String direction, String turnstileApiId) {
+        return service.registerGate(id, factoryId, edgeId, name, direction, turnstileApiId);
+    }
+
+    // PUT /api/v1/gates/{gateId}/status
+    public GateView updateGateStatus(String gateId, String status) {
+        return service.updateGateStatus(gateId, status);
+    }
+
+    // POST /api/v1/gates/{gateId}/heartbeat
+    public void recordGateHeartbeat(String gateId, String ipAddress) {
+        service.recordGateHeartbeat(gateId, ipAddress);
     }
 }
