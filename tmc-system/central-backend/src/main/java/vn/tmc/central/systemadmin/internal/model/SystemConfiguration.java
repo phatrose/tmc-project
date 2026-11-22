@@ -1,9 +1,35 @@
 package vn.tmc.central.systemadmin.internal.model;
 
-/** PHỤ TRÁCH: Task 5. TODO: Hoàn thiện contract và nghiệp vụ theo PDF.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Model/DTO mô tả dữ liệu với các trường tối thiểu hiện có, không phải schema đầy đủ.
- * - Cần làm: Chốt ID, nullability, trường bắt buộc và quan hệ trước khi thêm validation/migration; tham chiếu checklist dữ liệu trong docs.
- * - Lưu ý bàn giao: Không thêm phụ thuộc UI/HTTP vào model; record không tự thực thi nghiệp vụ hoặc kiểm tra quyền truy cập.
+import java.time.Instant;
+import java.util.Objects;
+
+/**
+ * PHỤ TRÁCH: Task 5.
+ * VAI TRÒ: Domain Model cho SystemConfiguration.
+ * NGUỒN: main.pdf, FR-SA-02, FR-SA-03; §5.1.
  */
-public record SystemConfiguration(String key, String value) {}
+public record SystemConfiguration(
+    String key,
+    String value,
+    String category,
+    String description,
+    Instant updatedAt
+) {
+    public SystemConfiguration {
+        Objects.requireNonNull(key, "key must not be null");
+        Objects.requireNonNull(value, "value must not be null");
+        if (category == null || category.isBlank()) {
+            category = "SYSTEM";
+        }
+        if (description == null) {
+            description = "";
+        }
+        if (updatedAt == null) {
+            updatedAt = Instant.now();
+        }
+    }
+
+    public SystemConfiguration(String key, String value) {
+        this(key, value, "SYSTEM", "", Instant.now());
+    }
+}

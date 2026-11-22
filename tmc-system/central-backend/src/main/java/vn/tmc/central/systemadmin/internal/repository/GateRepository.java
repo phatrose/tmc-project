@@ -1,15 +1,19 @@
 package vn.tmc.central.systemadmin.internal.repository;
 
 import vn.tmc.central.systemadmin.internal.model.Gate;
+import java.util.List;
 import java.util.Optional;
 
-/** PHỤ TRÁCH: Task 5. TODO: Hoàn thiện contract và nghiệp vụ theo PDF.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Port truy cập dữ liệu cho model tương ứng; implementation persistence sẽ được bổ sung sau.
- * - Cần làm: Chốt cách xử lý ID không tồn tại, transaction và truy vấn có scope; findById trả Optional, save không được âm thầm bỏ lỗi.
- * - Lưu ý bàn giao: Đặt JPA mapping/SQL trong adapter, không để service module khác gọi repository trực tiếp; viết test DB thật.
+/**
+ * PHỤ TRÁCH: Task 5.
+ * VAI TRÒ: Repository Port cho Gate.
+ * NGUỒN: main.pdf, FR-GS-01; §5.1.
  */
 public interface GateRepository {
     Optional<Gate> findById(String id);
+    List<Gate> findByFactoryId(String factoryId);
+    Optional<Gate> findByTurnstileApiId(String turnstileApiId);
+    List<Gate> findAll();
     void save(Gate value);
+    void delete(String id);
 }
