@@ -1,9 +1,37 @@
-# PHỤ TRÁCH: Task 8.
-# TODO: cấu hình theo môi trường cho PostgreSQL/Flyway, HTTPS/mTLS, bearer auth và secret references.
-# Chưa có cấu hình chạy hoặc tài khoản demo; không thêm mật khẩu/khóa vào Git.
-
-# HƯỚNG DẪN TRIỂN KHAI:
-# Khai báo cấu hình kết nối PostgreSQL/Flyway và tham chiếu secret qua môi trường.
-# Tách auth frontend và mTLS/binding cho Edge; không dùng tài khoản demo hoặc bỏ xác thực để chạy thử.
-# Timezone chốt công lấy từ nhà máy; event truyền/lưu UTC, chốt kỳ 06:30 ngày 01 theo giờ địa phương.
-# Thống nhất tên cấu hình với Task 1/5/6/7 trước bean wiring; file này hiện chưa có giá trị chạy thực tế.
+# PHỤ TRÁCH: Task 8. Secrets from environment; migrations owned by each module.
+spring:
+  application:
+    name: tmc-central
+  datasource:
+    url: ${TMC_DB_URL:jdbc:postgresql://localhost:5432/tmc}
+    username: ${TMC_DB_USER:}
+    password: ${TMC_DB_PASSWORD:}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+    clean-disabled: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true

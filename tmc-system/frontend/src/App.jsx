@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import EmployeePage from './pages/EmployeePage.jsx';
 import QrPage from './pages/QrPage.jsx';
 import KioskPage from './pages/KioskPage.jsx';
@@ -7,36 +7,65 @@ import AttendancePage from './pages/AttendancePage.jsx';
 import ReportsPage from './pages/ReportsPage.jsx';
 import AdministrationPage from './pages/AdministrationPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import { routes, canAccess, routeFromHash } from './navigation.js';
+import { getSession, subscribeSession } from './session.js';
+import { logout } from './api.js';
+import RequestState from './components/RequestState.jsx';
 
-
-/**
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Khung điều hướng giữa các trang React; activeId hiện chỉ điều khiển màn hình đang chọn.
- * - Cần làm: Bổ sung router/session và route guard phối hợp Task 1; giữ từng trang nghiệp vụ trong file riêng.
- * - Lưu ý bàn giao: Ẩn menu không thay kiểm tra quyền backend; chưa lưu token hoặc cấp quyền từ trạng thái menu.
- */
-
-// PHỤ TRÁCH: Task 8. TODO: router và route guard sau khi chốt auth.
-const pages = [
-  { id: 'EmployeePage', title: 'Nhân sự', component: EmployeePage },
-  { id: 'QrPage', title: 'QR cá nhân', component: QrPage },
-  { id: 'KioskPage', title: 'Quét tại cổng', component: KioskPage },
-  { id: 'GuardConsolePage', title: 'Bảng điều khiển bảo vệ', component: GuardConsolePage },
-  { id: 'AttendancePage', title: 'Chấm công', component: AttendancePage },
-  { id: 'ReportsPage', title: 'Báo cáo và kiểm toán', component: ReportsPage },
-  { id: 'AdministrationPage', title: 'Quản trị', component: AdministrationPage },
-  { id: 'LoginPage', title: 'Đăng nhập', component: LoginPage }
-];
+// PHỤ TRÁCH: Task 8. Hash routing hỗ trợ back/forward; các trang do chủ module triển khai.
+const components = { employees: EmployeePage, qr: QrPage, kiosk: KioskPage,
+  guard: GuardConsolePage, attendance: AttendancePage, reports: ReportsPage,
+  administration: AdministrationPage, login: LoginPage };
 export default function App() {
-  const [activeId, setActiveId] = useState(pages[0].id);
-  const ActivePage = pages.find(page => page.id === activeId).component;
+  const [hash, setHash] = useState(window.location.hash);
+  const [logoutError, setLogoutError] = useState(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const session = useSyncExternalStore(subscribeSession, getSession, () => null);
+  const route = routeFromHash(hash);
+  useEffect(() => {
+    const changed = () => { setHash(window.location.hash); setLogoutError(null); };
+    window.addEventListener('hashchange', changed);
+    return () => window.removeEventListener('hashchange', changed);
+  }, []);
+  useEffect(() => { document.title = `${route?.title || 'Không tìm thấy'} · TMC`; }, [route]);
+  const ActivePage = route && components[route.id];
+  async function signOut() {
+    setLoggingOut(true); setLogoutError(null);
+    try { await logout(); window.location.hash = '/login'; }
+    catch (error) { setLogoutError(error); }
+    finally { setLoggingOut(false); }
+  }
   return <div className="layout">
-    <aside><h2>TMC</h2><p>Khung ứng dụng</p>
-      <nav aria-label="Các chức năng">{pages.map(page =>
-        <button key={page.id} aria-current={page.id === activeId ? 'page' : undefined}
-          onClick={() => setActiveId(page.id)}>{page.title}</button>
-      )}</nav>
+    <a className="skip-link" href="#content" onClick={event => {
+      event.preventDefault(); document.getElementById('content')?.focus();
+    }}>Đến nội dung chính</a>
+    <aside>
+      <a className="brand" href="#/home">TMC<span>Quản lý chấm công</span></a>
+      <nav aria-label="Các chức năng">{routes.map(item =>
+        <a key={item.id} href={`#/${item.id}`} aria-current={route?.id === item.id ? 'page' : undefined}>
+          {item.title}{!canAccess(item, session) && <span className="locked" aria-label="Cần quyền truy cập"> · Khóa</span>}
+        </a>)}</nav>
+      <div className="session"><p>{session ? 'Đã đăng nhập' : 'Chưa đăng nhập'}</p>
+        {session && <button onClick={signOut} disabled={loggingOut}>{loggingOut ? 'Đang đăng xuất…' : 'Đăng xuất'}</button>}
+      </div>
     </aside>
-    <main><ActivePage /></main>
+    <main id="content" tabIndex={-1}>
+      {logoutError && <RequestState error={logoutError} />}
+      {!route ? <section><h1>Không tìm thấy trang</h1><a href="#/home">Về tổng quan</a></section>
+      : route.id === 'home' ? <section>
+        <p className="eyebrow">TMC · Nền tảng nhóm</p><h1>Không gian làm việc</h1>
+        <p>Chọn chức năng từ menu để bắt đầu.</p>
+        <div className="notice"><strong>Ứng dụng đang được triển khai.</strong>
+          <p>Các trang nghiệp vụ hiện là khung chờ từng module hoàn thiện. Chưa có dữ liệu mẫu hoặc phiên đăng nhập mô phỏng.</p></div>
+        <div className="module-grid">{routes.filter(r => r.task && r.id !== 'login').map(item =>
+          <a className="module-card" key={item.id} href={`#/${item.id}`}><small>Task {item.task}</small><h2>{item.title}</h2><span>Xem chức năng →</span></a>)}</div>
+      </section>
+      : !canAccess(route, session) ? <section><h1>{route.title}</h1><p role="status">
+        {session ? 'Phiên hiện tại chưa có quyền truy cập chức năng này.' : 'Bạn cần đăng nhập để truy cập chức năng này.'}</p>
+        {!session && <a href="#/login">Đến trang đăng nhập</a>}</section>
+      : <><p className="eyebrow">Task {route.task} · {route.title}</p>
+        {route.device && <p className="notice">Kiosk cần chứng chỉ thiết bị được cấp riêng. Phiên đăng nhập người dùng không thay thế danh tính kiosk.</p>}
+        <ActivePage /></>}
+    </main>
   </div>;
 }

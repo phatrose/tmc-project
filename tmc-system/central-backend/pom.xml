@@ -8,6 +8,11 @@
   </parent>
   <artifactId>central-backend</artifactId>
   <dependencies>
+    <!-- PHỤ TRÁCH: Task 8. Health nền tảng; không thay kiểm tra nghiệp vụ. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
     <dependency>
       <groupId>vn.tmc</groupId>
       <artifactId>shared-contracts</artifactId>
@@ -73,6 +78,14 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
   <profiles>
     <profile>
       <id>integration</id>
