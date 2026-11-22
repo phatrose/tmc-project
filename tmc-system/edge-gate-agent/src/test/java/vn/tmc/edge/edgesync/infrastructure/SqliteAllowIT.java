@@ -13,6 +13,7 @@ import vn.tmc.edge.edgesync.api.LocalEventStorePort;
 import vn.tmc.edge.edgesync.api.ReplayReservation;
 import vn.tmc.edge.edgesync.api.ScanInputFingerprint;
 import vn.tmc.edge.edgesync.api.ScanOutcome;
+import vn.tmc.edge.gatestation.domain.CommandResult;
 import vn.tmc.edge.gatestation.domain.TurnstileControlPort;
 
 import java.nio.file.Path;
@@ -202,8 +203,8 @@ class SqliteAllowIT {
     void storeBeforeCommand_unlockObservesTheCompleteCommitAndRetryDoesNotUnlock() throws SQLException {
         var attempt = firstAttempt();
         var unlocks = new AtomicInteger();
-        TurnstileControlPort device = commandId -> {
-            assertEquals(COMMAND_ID.toString(), commandId);
+        TurnstileControlPort device = (commandId, gateId) -> {
+            assertEquals(COMMAND_ID, commandId);
             try {
                 var reopened = store(COMMITTED_AT);
                 var outcome = reopened.findScanOutcome(SCAN_ID, attempt.reservation().inputFingerprint()).orElseThrow();
@@ -213,6 +214,7 @@ class SqliteAllowIT {
                 throw new AssertionError("The device must observe committed SQLite state", failure);
             }
             unlocks.incrementAndGet();
+            return accepted(commandId);
         };
 
         commitThenUnlock(store(COMMITTED_AT), attempt, device);
@@ -234,7 +236,10 @@ class SqliteAllowIT {
                     END
                     """);
             var failure = assertThrows(EventStoreException.class,
-                    () -> commitThenUnlock(store, firstAttempt(), ignored -> unlocks.incrementAndGet()));
+                    () -> commitThenUnlock(store, firstAttempt(), (commandId, gateId) -> {
+                        unlocks.incrementAndGet();
+                        return accepted(commandId);
+                    }));
             assertStorageError(failure, SQLiteErrorCode.SQLITE_CONSTRAINT_FOREIGNKEY);
             assertEquals(0, unlocks.get());
             assertCounts(0);
@@ -244,7 +249,11 @@ class SqliteAllowIT {
     }
 
     private static void commitThenUnlock(LocalEventStorePort store, Attempt attempt, TurnstileControlPort device) {
-        reserve(store, attempt).newCommand().ifPresent(command -> device.unlock(command.commandId().toString()));
+        reserve(store, attempt).newCommand().ifPresent(command -> device.unlock(command.commandId(), command.gateId()));
+    }
+
+    private static CommandResult accepted(UUID commandId) {
+        return new CommandResult(commandId, EventPayload.CommandStatus.UNLOCK_ACCEPTED, COMMITTED_AT, null);
     }
 
     private void assertCommittedAggregate(Attempt attempt, CommittedEvent committed) throws SQLException {
