@@ -1,0 +1,24 @@
+.t4-reports { max-width: 1500px; margin: 0 auto; }
+.t4-reports h1 { margin-bottom: .35rem; }
+.t4-tabs, .t4-pager { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin: 1rem 0; }
+.t4-tabs [aria-selected="true"] { background: #173d6c; color: white; }
+.t4-filters { display: flex; gap: .8rem; align-items: end; flex-wrap: wrap; margin: 1rem 0; padding: 1rem; background: #f0f4f8; border-radius: .6rem; }
+.t4-filters label { display: grid; gap: .3rem; font-size: .9rem; }
+.t4-filters input, .t4-filters select { min-width: 150px; max-width: 100%; padding: .55rem; border: 1px solid #b9c6d4; border-radius: .3rem; background: white; }
+.t4-filters input[list] { width: 330px; }
+.t4-reports button { cursor: pointer; padding: .6rem .85rem; border: 1px solid #9badc3; border-radius: .3rem; background: white; color: #173d6c; }
+.t4-reports button:disabled { opacity: .5; cursor: default; }
+.t4-reports button:focus-visible, .t4-reports input:focus-visible, .t4-reports select:focus-visible { outline: 3px solid #3b82f6; outline-offset: 2px; }
+.t4-error { background: #fff1f0; border-left: 4px solid #b42318; color: #8c2018; padding: .8rem 1rem; margin: 1rem 0; overflow-wrap: anywhere; }
+.t4-error small, .t4-table small, .t4-jobs small { display: block; margin-top: .3rem; }
+.t4-notice { background: #eaf6ef; padding: .8rem; }
+.t4-table { overflow-x: auto; border: 1px solid #d3dce6; border-radius: .4rem; }
+.t4-table table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.t4-table th, .t4-table td { padding: .7rem; border-bottom: 1px solid #e0e6ed; text-align: left; vertical-align: top; }
+.t4-table th { background: #eef2f7; white-space: nowrap; }
+.t4-id { overflow-wrap: anywhere; font-family: monospace; font-size: .8rem; }
+.t4-summary { display: flex; flex-wrap: wrap; gap: 1rem; background: #eef7ff; padding: 1rem; margin: 1rem 0; }
+.t4-summary small { width: 100%; }
+.t4-jobs { margin-top: 2rem; }
+.t4-jobs article { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; border: 1px solid #cbd5e1; padding: 1rem; margin: .6rem 0; border-radius: .4rem; }
+@media (max-width: 650px) { .t4-filters { align-items: stretch; } .t4-filters label, .t4-filters input[list] { width: 100%; } }

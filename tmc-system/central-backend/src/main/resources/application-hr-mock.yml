@@ -1,0 +1,14 @@
+server:
+  port: ${HR_MOCK_PORT:8444}
+  ssl:
+    enabled: true
+    key-store: ${TMC_HR_MOCK_KEY_STORE}
+    key-store-password: ${TMC_HR_MOCK_KEY_STORE_PASSWORD}
+    key-store-type: PKCS12
+tmc:
+  reporting:
+    closing-cron: '-'
+    initial-delay-ms: 86400000
+  hr-mock:
+    mode: ${TMC_HR_MOCK_MODE:SUCCESS}
+    delay-ms: ${TMC_HR_MOCK_DELAY_MS:20000}

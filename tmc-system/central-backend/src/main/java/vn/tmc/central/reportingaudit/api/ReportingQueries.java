@@ -1,11 +1,10 @@
 package vn.tmc.central.reportingaudit.api;
 
-/** PHỤ TRÁCH: Task 4. TODO: Hoàn thiện contract và nghiệp vụ theo PDF.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Contract công khai cho caller của module; input/output đã có kiểu để nhóm thống nhất trước tích hợp.
- * - Cần làm: Bổ sung quy ước null/not-found, lỗi quyền và lỗi dependency; caller phải dùng interface thay vì import internal implementation.
- * - Lưu ý bàn giao: Không trả JPA entity hoặc lộ repository qua API; thay đổi chữ ký cần thống nhất với task sử dụng.
- */
+import vn.tmc.central.reportingaudit.api.ReportingSources.AttendanceFilter;
+import vn.tmc.central.reportingaudit.api.ReportingSources.DailyAttendance;
+import vn.tmc.central.reportingaudit.api.ReportingSources.ActorContext;
+import vn.tmc.central.reportingaudit.api.ReportingSources.Page;
+
 public interface ReportingQueries {
-    AttendanceReportView generateReport(String factoryId, String period);
+    Page<DailyAttendance> dailyRecords(ActorContext actor, AttendanceFilter filter);
 }
