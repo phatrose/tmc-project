@@ -1,21 +1,115 @@
 package vn.tmc.contracts;
 
+import java.time.Instant;
+import java.util.Objects;
+import java.util.UUID;
+
 /**
- * KHUNG TRIỂN KHAI — có khai báo, chưa hiện thực nghiệp vụ.
  * PHỤ TRÁCH: Task 3.
- * VAI TRÒ: DTO EVT-01.
- * NGUỒN: main.pdf, §5.2.
- * TÀI LIỆU PDF: docs/tasks/04-api-contracts.md; docs/REQUIREMENTS.md.
- * TODO[Task 3]: employeeId, direction IN/OUT, source ONLINE/OFFLINE/MANUAL, jti/kid và commandId.
- * TODO[Task 3]: MANUAL có operatorId/reason và không jti; command result là EVT-03 riêng.
- * PHỐI HỢP: Task 2, Task 4, Task 7.
- * Kiểu dữ liệu là khung đề xuất; chốt contract trước khi tích hợp runtime.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Payload sự kiện công chứa nhân viên, hướng, source và tham chiếu token/command.
- * - Cần làm: MANUAL cần operatorId/reason; chốt nullability jti/kid theo nguồn. Kết quả lệnh cổng là EVT-03 riêng.
- * - Lưu ý bàn giao: Giữ nguyên dữ kiện sau commit; không trộn ACK đồng bộ hoặc trạng thái thiết bị vào payload này.
+ * VAI TRÒ: DTO EVT-01: attendance.event.recorded theo CONTRACT-V1.md §6 & §12.
+ * NGUỒN: CONTRACT-V1.md §6:
+ * {employeeId:UUID, direction:"IN"|"OUT", source:"ONLINE"|"OFFLINE"|"MANUAL", jti:UUID?, kid:string?, tokenIssuedAt:Instant?, commandId:UUID, operatorId:UUID?, reason:string?}
+ * 
+ * QUY TẮC BẮT BUỘC:
+ * - QR event (ONLINE / OFFLINE): bắt buộc jti, kid, tokenIssuedAt; operatorId = null, reason = null.
+ * - MANUAL event: bắt buộc operatorId, reason; jti = null, kid = null, tokenIssuedAt = null.
  */
-public record AttendancePayload(String employeeId, Direction direction, Source source, String jti, String kid, String commandId, String operatorId, String reason) {
+public record AttendancePayload(
+        UUID employeeId,
+        Direction direction,
+        Source source,
+        UUID jti,
+        String kid,
+        Instant tokenIssuedAt,
+        UUID commandId,
+        UUID operatorId,
+        String reason
+) {
     public enum Direction { IN, OUT }
     public enum Source { ONLINE, OFFLINE, MANUAL }
+
+    public AttendancePayload {
+        Objects.requireNonNull(employeeId, "employeeId is required");
+        Objects.requireNonNull(direction, "direction is required");
+        Objects.requireNonNull(commandId, "commandId is required");
+        if (source == null) {
+            source = Source.ONLINE;
+        }
+
+        if (source == Source.MANUAL) {
+            if (operatorId == null) {
+                throw new IllegalArgumentException("operatorId is required for MANUAL source");
+            }
+            if (reason == null || reason.isBlank()) {
+                throw new IllegalArgumentException("reason is required for MANUAL source");
+            }
+            if (jti != null || kid != null || tokenIssuedAt != null) {
+                throw new IllegalArgumentException("MANUAL event must not have token fields (jti, kid, tokenIssuedAt)");
+            }
+        } else {
+            // ONLINE or OFFLINE QR scan event
+            if (jti == null) {
+                throw new IllegalArgumentException("jti is required for QR attendance event");
+            }
+            if (kid == null || kid.isBlank()) {
+                throw new IllegalArgumentException("kid is required for QR attendance event");
+            }
+            if (tokenIssuedAt == null) {
+                throw new IllegalArgumentException("tokenIssuedAt is required for QR attendance event");
+            }
+            if (operatorId != null || reason != null) {
+                throw new IllegalArgumentException("QR event must not have operatorId or reason");
+            }
+        }
+    }
+
+    /**
+     * Factory cho sự kiện quét mã QR (ONLINE hoặc OFFLINE).
+     */
+    public static AttendancePayload ofQr(
+            UUID employeeId,
+            Direction direction,
+            Source source,
+            UUID jti,
+            String kid,
+            Instant tokenIssuedAt,
+            UUID commandId
+    ) {
+        return new AttendancePayload(employeeId, direction, source, jti, kid, tokenIssuedAt, commandId, null, null);
+    }
+
+    /**
+     * Factory cho sự kiện mở cổng thủ công (MANUAL override).
+     */
+    public static AttendancePayload ofManual(
+            UUID employeeId,
+            Direction direction,
+            UUID operatorId,
+            String reason,
+            UUID commandId
+    ) {
+        return new AttendancePayload(employeeId, direction, Source.MANUAL, null, null, null, commandId, operatorId, reason);
+    }
+
+    /**
+     * Tiện ích chuyển đổi sang Canonical JSON theo RFC 8785 (keys sorted alphabetically).
+     */
+    public String toCanonicalJson() {
+        if (source == Source.MANUAL) {
+            return String.format(
+                    "{\"commandId\":\"%s\",\"direction\":\"%s\",\"employeeId\":\"%s\",\"operatorId\":\"%s\",\"reason\":\"%s\",\"source\":\"MANUAL\"}",
+                    commandId, direction.name(), employeeId, operatorId, escapeJson(reason)
+            );
+        } else {
+            return String.format(
+                    "{\"commandId\":\"%s\",\"direction\":\"%s\",\"employeeId\":\"%s\",\"jti\":\"%s\",\"kid\":\"%s\",\"source\":\"%s\",\"tokenIssuedAt\":\"%s\"}",
+                    commandId, direction.name(), employeeId, jti, kid, source.name(), tokenIssuedAt.toString()
+            );
+        }
+    }
+
+    private static String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
 }

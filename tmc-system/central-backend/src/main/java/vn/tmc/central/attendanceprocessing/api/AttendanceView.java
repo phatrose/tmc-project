@@ -1,9 +1,19 @@
 package vn.tmc.central.attendanceprocessing.api;
 
-/** PHỤ TRÁCH: Task 3. TODO: Hoàn thiện contract và nghiệp vụ theo PDF.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Model/DTO mô tả dữ liệu với các trường tối thiểu hiện có, không phải schema đầy đủ.
- * - Cần làm: Chốt ID, nullability, trường bắt buộc và quan hệ trước khi thêm validation/migration; tham chiếu checklist dữ liệu trong docs.
- * - Lưu ý bàn giao: Không thêm phụ thuộc UI/HTTP vào model; record không tự thực thi nghiệp vụ hoặc kiểm tra quyền truy cập.
+import java.util.List;
+
+/**
+ * PHỤ TRÁCH: Task 3.
+ * DTO đại diện cho tổng quan trạng thái chấm công của nhân viên.
  */
-public record AttendanceView(String eventId, String employeeId, String direction) {}
+public record AttendanceView(
+        String employeeId,
+        String currentStatus,
+        DailyAttendanceView todayRecord,
+        List<DailyAttendanceView> recentRecords,
+        MonthlyAttendanceSummaryView currentMonthSummary
+) {
+    public AttendanceView(String eventId, String employeeId, String direction) {
+        this(employeeId, direction, null, List.of(), null);
+    }
+}

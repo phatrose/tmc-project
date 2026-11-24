@@ -1,15 +1,28 @@
 package vn.tmc.central.attendanceprocessing.internal.repository;
 
 import vn.tmc.central.attendanceprocessing.internal.model.Attendance;
-import java.util.Optional;
+import vn.tmc.central.attendanceprocessing.internal.model.AttendanceEvent;
 
-/** PHỤ TRÁCH: Task 3. TODO: Hoàn thiện contract và nghiệp vụ theo PDF.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Port truy cập dữ liệu cho model tương ứng; implementation persistence sẽ được bổ sung sau.
- * - Cần làm: Chốt cách xử lý ID không tồn tại, transaction và truy vấn có scope; findById trả Optional, save không được âm thầm bỏ lỗi.
- * - Lưu ý bàn giao: Đặt JPA mapping/SQL trong adapter, không để service module khác gọi repository trực tiếp; viết test DB thật.
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * PHỤ TRÁCH: Task 3.
+ * Port lưu trữ sự kiện quẹt thẻ bất biến (attendance_events).
  */
 public interface AttendanceRepository {
+    Optional<AttendanceEvent> findByEventId(UUID eventId);
+    boolean existsByEventId(UUID eventId);
+    void saveEvent(AttendanceEvent event);
+    List<AttendanceEvent> findByEmployeeIdAndDateRange(UUID employeeId, Instant from, Instant to);
+    List<AttendanceEvent> findByFactoryIdAndDateRange(UUID factoryId, Instant from, Instant to);
+    List<AttendanceEvent> findByJti(UUID jti);
+    Optional<AttendanceEvent> findLastByEmployeeId(UUID employeeId);
+    List<AttendanceEvent> findLatestEventsByFactoryId(UUID factoryId);
+
+    // Tương thích ngược
     Optional<Attendance> findById(String id);
     void save(Attendance value);
 }
