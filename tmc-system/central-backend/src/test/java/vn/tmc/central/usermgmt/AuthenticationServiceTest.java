@@ -45,6 +45,18 @@ class AuthenticationServiceTest {
 
     private AuthenticationService authenticationService;
 
+    @Test
+    void inactiveAccountCannotAuthenticate() {
+        UserAccount account = new UserAccount("disabled", "hash", null,
+                List.of(Role.EMPLOYEE), List.of(), List.of(), "SELF");
+        assertThat(account.isLocked()).isFalse();
+        account.update(null, null, null, null, false, account.getVersion());
+        assertThat(account.isLocked()).isTrue();
+        when(userAccountRepository.findByUsername("disabled")).thenReturn(Optional.of(account));
+        assertThatThrownBy(() -> authenticationService.authenticate(new LoginRequest("disabled", "password")))
+                .isInstanceOf(AccountLockedException.class);
+        org.mockito.Mockito.verifyNoInteractions(passwordEncoder, tokenIssuerPort);
+    }
     @BeforeEach
     void setUp() {
         authenticationService = new AuthenticationService(

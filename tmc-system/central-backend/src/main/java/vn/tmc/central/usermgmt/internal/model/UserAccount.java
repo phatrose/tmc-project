@@ -89,6 +89,8 @@ public class UserAccount {
     public List<String> getDepartmentIds() { return Collections.unmodifiableList(departmentIds); }
     public String getScope() { return scope; }
     public boolean isActive() { return active; }
+    // PHỤ TRÁCH: Task 1. Contract V1 §4 dùng active cho trạng thái tài khoản; không có khóa tạm riêng.
+    public boolean isLocked() { return !active; }
     public int getVersion() { return version; }
     public Instant getCreatedAt() { return createdAt; }
 
