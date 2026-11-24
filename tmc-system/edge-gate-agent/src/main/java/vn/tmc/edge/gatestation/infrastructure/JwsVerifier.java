@@ -83,10 +83,6 @@ public final class JwsVerifier implements QrVerificationPort {
         if (token.length() > MAX_TOKEN_CHARS) {
             reject(QrRejectReason.INVALID_TOKEN, "token vượt giới hạn độ dài");
         }
-        if (!keyCache.hasUsableKeys()) {
-            reject(QrRejectReason.CACHE_UNAVAILABLE, "cache khóa không khả dụng, fail closed");
-        }
-
         String[] parts;
         try {
             parts = JwsCompact.splitCompact(token);
@@ -109,6 +105,9 @@ public final class JwsVerifier implements QrVerificationPort {
         // 4) khóa tin cậy trong cache
         Optional<QrTrustedKey> found = keyCache.findByKid(kid);
         if (found.isEmpty()) {
+            if (!keyCache.hasUsableKeys()) {
+                reject(QrRejectReason.CACHE_UNAVAILABLE, "cache khóa không khả dụng, fail closed");
+            }
             reject(QrRejectReason.UNKNOWN_KID, "kid chưa có trong cache tin cậy; refresh chạy nền qua mTLS");
         }
         QrTrustedKey key = found.get();

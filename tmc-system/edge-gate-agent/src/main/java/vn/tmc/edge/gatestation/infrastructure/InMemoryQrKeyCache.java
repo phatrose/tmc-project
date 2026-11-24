@@ -27,6 +27,8 @@ public final class InMemoryQrKeyCache implements QrKeyCachePort {
     private volatile Snapshot snapshot = Snapshot.EMPTY;
 
     private static final class Snapshot {
+        static final Snapshot EMPTY = new Snapshot(Map.of(), -1);
+
         final Map<String, QrTrustedKey> byKid;
         final long revision;
 
@@ -35,8 +37,6 @@ public final class InMemoryQrKeyCache implements QrKeyCachePort {
             this.revision = revision;
         }
     }
-
-    private static final Snapshot EMPTY = new Snapshot(Map.of(), -1);
 
     @Override
     public Optional<QrTrustedKey> findByKid(String kid) {
@@ -57,7 +57,7 @@ public final class InMemoryQrKeyCache implements QrKeyCachePort {
         if (keySet == null || keySet.keys() == null) {
             throw new IllegalArgumentException("QrKeySet và keys bắt buộc");
         }
-        if (keySet.revision() < snapshot.revision && snapshot.revision >= 0) {
+        if (keySet.version() < snapshot.revision && snapshot.revision >= 0) {
             // revision lùi là tín hiệu cache thiếu/hỏng: không áp dụng (§8)
             throw new IllegalArgumentException("KeySet revision lùi: từ chối áp dụng");
         }
@@ -70,7 +70,7 @@ public final class InMemoryQrKeyCache implements QrKeyCachePort {
                 throw new IllegalArgumentException("KeySet có kid trùng: " + entry.kid());
             }
         }
-        snapshot = new Snapshot(Map.copyOf(built), keySet.revision());
+        snapshot = new Snapshot(Map.copyOf(built), keySet.version());
     }
 
     @Override
