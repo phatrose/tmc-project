@@ -1,26 +1,37 @@
 package vn.tmc.edge.edgesync.api;
 
-import vn.tmc.contracts.EventEnvelope;
 import vn.tmc.contracts.SyncBatchRequest;
 import vn.tmc.contracts.SyncBatchAck;
 
+import java.util.Optional;
+import java.util.UUID;
+
 /**
  * PHỤ TRÁCH: Task 7.
- * Khung triển khai theo docs/DECISIONS.md; chưa có nghiệp vụ hoạt động.
- *
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Port do edge-sync cung cấp cho luồng quét và worker; nhận event/batch ACK đã kiểm tra contract.
- * - Cần làm: reserveAndAppend là ranh giới transaction cho replay, sequence, event và delivery.
- * - Lưu ý bàn giao: Giao diện này không gửi HTTP hoặc điều khiển cổng; lưu lỗi phải truyền lỗi lên caller, không nuốt lỗi.
+ * The local transaction boundary for Gate Station and the sync worker.
  */
 public interface LocalEventStorePort {
-    // TODO: reserve jti + sequence + event + PENDING trong một transaction WAL.
-    // Trùng jti/lưu lỗi phải từ chối, không mở cổng. jti null chỉ cho sự kiện không dùng QR.
-    void reserveAndAppend(EventEnvelope event, String jti);
-    // TODO: lưu EVT-02/EVT-03 riêng; không sửa payload event gốc.
-    void append(EventEnvelope event);
-    // TODO: lưu lô/membership bền vững; giới hạn 50 và giữ nguyên qua retry.
-    SyncBatchRequest pendingBatch();
-    // TODO: ACK và cursor cùng transaction; không ACK hàng loạt chỉ vì HTTP 200.
+    /**
+     * Commits an authorized QR or MANUAL attendance ALLOW atomically.
+     * QR uses a QR reservation and MANUAL uses an ACTION reservation.
+     * Send a device command only from the returned newCommand, which is empty on retries.
+     */
+    CommittedEvent reserveAndAppend(UUID scanId, EventDraft draft, ReplayReservation reservation);
+
+    /**
+     * Persists an authorized EMERGENCY command and verified ACTION reservation without an event.
+     * Only the first successful commit returns a new command.
+     */
+    CommittedCommand commitEmergency(UUID scanId, CommandIntent command, ReplayReservation reservation);
+
+    /** Look up a retry before credential verification. A changed input raises IDEMPOTENCY_CONFLICT. */
+    Optional<ScanOutcome> findScanOutcome(UUID scanId, ScanInputFingerprint fingerprint);
+
+    /** Durably append a non-attendance event and initialize its delivery state. */
+    CommittedEvent append(EventDraft draft);
+
+    /** maxEvents limits new batches. An active batch retains its original membership. */
+    SyncBatchRequest pendingBatch(int maxEvents);
+
     void applyAcknowledgements(SyncBatchAck acknowledgement);
 }
