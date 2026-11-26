@@ -66,7 +66,7 @@ final class BootstrapValidation {
         }
     }
 
-    private static void validateKeys(KeySet keys, Instant now) {
+    static void validateKeys(KeySet keys, Instant now) {
         check(keys != null && version(keys.version()) && validTime(keys.generatedAt()) && validTime(keys.trustedUntil())
                 && !keys.generatedAt().isAfter(now) && keys.generatedAt().isBefore(keys.trustedUntil())
                 && keys.trustedUntil().isAfter(now), "Key snapshot is missing or invalid");

@@ -6,11 +6,13 @@ import vn.tmc.edge.edgesync.application.CachedAccess;
 import vn.tmc.edge.edgesync.application.ConnectivityMonitor;
 import vn.tmc.edge.edgesync.application.EdgeOperations;
 import vn.tmc.edge.edgesync.application.HeartbeatWorker;
+import vn.tmc.edge.edgesync.application.KeyRefreshWorker;
 import vn.tmc.edge.edgesync.application.RecoveryWorker;
 import vn.tmc.edge.edgesync.application.SyncWorker;
 import vn.tmc.edge.edgesync.domain.BootstrapCache.Identity;
 import vn.tmc.edge.edgesync.infrastructure.RestBootstrapClient;
 import vn.tmc.edge.edgesync.infrastructure.RestHeartbeatClient;
+import vn.tmc.edge.edgesync.infrastructure.RestKeyRefreshClient;
 import vn.tmc.edge.edgesync.infrastructure.RestSyncClient;
 import vn.tmc.edge.edgesync.infrastructure.SqliteStore;
 
@@ -31,6 +33,7 @@ import java.util.random.RandomGenerator;
 
 /** Starts the Edge background services for a provisioned device. */
 public final class EdgeApplication {
+    public static final String KEY_REFRESH_PATH = "/api/v1/qr/keys/refresh";
     private static final System.Logger LOGGER = System.getLogger(EdgeApplication.class.getName());
 
     private EdgeApplication() {}
@@ -53,13 +56,15 @@ public final class EdgeApplication {
                 clock, RandomGenerator.getDefault());
         var bootstrap = new BootstrapWorker(
                 new RestBootstrapClient(centralOrigin.resolve("/api/v1/edge/bootstrap"), deviceTls), cache, clock);
+        var keyRefresh = new KeyRefreshWorker(
+                new RestKeyRefreshClient(centralOrigin.resolve(KEY_REFRESH_PATH), deviceTls), cache);
         var connectivity = new ConnectivityMonitor(clock, at -> store.recordCentralContact(identity.edgeId(), at));
         var operations = new EdgeOperations(identity.edgeId(), store, store, cache, connectivity, clock, () -> diskFree(file));
         var heartbeat = new HeartbeatWorker(operations,
                 new RestHeartbeatClient(centralOrigin.resolve("/api/v1/edge/heartbeat"), deviceTls), connectivity);
 
         new RecoveryWorker(store::recover).recover();
-        var scheduler = Executors.newScheduledThreadPool(3);
+        var scheduler = Executors.newScheduledThreadPool(4);
         schedule(scheduler, "sync", Duration.ofSeconds(1), () -> {
             if (sync.runOnce() == SyncWorker.Result.APPLIED) {
                 connectivity.recordSuccess();
@@ -69,9 +74,14 @@ public final class EdgeApplication {
             bootstrap.refresh();
             connectivity.recordSuccess();
         });
+        schedule(scheduler, "key-refresh", KeyRefreshWorker.POLL_INTERVAL, () -> {
+            if (keyRefresh.refreshIfRequested() == KeyRefreshWorker.Result.APPLIED) {
+                connectivity.recordSuccess();
+            }
+        });
         schedule(scheduler, "heartbeat", HeartbeatWorker.DEFAULT_CYCLE, heartbeat::sendOnce);
         schedule(scheduler, "housekeeping", Duration.ofHours(1), store::cleanup);
-        return new RunningEdge(store, new CachedAccess(cache, bootstrap::requestKeyRefresh), connectivity, operations, scheduler);
+        return new RunningEdge(store, new CachedAccess(cache, keyRefresh::requestRefresh), connectivity, operations, scheduler);
     }
 
     public record RunningEdge(LocalEventStorePort eventStore, CachedAccess cache, ConnectivityMonitor connectivity,

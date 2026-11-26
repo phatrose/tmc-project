@@ -10,6 +10,7 @@ import vn.tmc.contracts.BootstrapResponse.*;
 import vn.tmc.edge.edgesync.api.EventStoreException;
 import vn.tmc.edge.edgesync.application.BootstrapWorker;
 import vn.tmc.edge.edgesync.application.CachedAccess;
+import vn.tmc.edge.edgesync.application.KeyRefreshWorker;
 import vn.tmc.edge.edgesync.domain.BootstrapCache;
 import vn.tmc.edge.edgesync.domain.BootstrapPort.FetchResult;
 import vn.tmc.edge.edgesync.domain.BootstrapProtocolException;
@@ -314,17 +315,27 @@ class SqliteBootstrapIT {
     @Test
     void unknownKid_deniesCurrentDecisionAndOnlySignalsBackgroundRefresh() {
         var cache = cache();
-        cache.apply(full(clock.instant()));
-        var requests = new ArrayList<Long>();
-        var worker = new BootstrapWorker(after -> {
-            requests.add(after);
-            return fetched(full(clock.instant()));
+        var initial = full(clock.instant());
+        cache.apply(initial);
+        var bootstrapRequests = new ArrayList<Long>();
+        var bootstrapWorker = new BootstrapWorker(after -> {
+            bootstrapRequests.add(after);
+            return new FetchResult(true, initial.revision(), null);
         }, cache, clock);
-        var access = new CachedAccess(cache, worker::requestKeyRefresh);
+        var keyRefreshes = new ArrayList<Long>();
+        var keyWorker = new KeyRefreshWorker(() -> {
+            keyRefreshes.add(1L);
+            return initial.keySet();
+        }, cache);
+        var access = new CachedAccess(cache, keyWorker::requestRefresh);
         assertEquals(UNKNOWN_KID, access.lookupKey("uncached-key", clock.instant()).decision());
-        assertTrue(requests.isEmpty());
-        worker.refresh();
-        assertEquals(List.of(0L), requests);
+        assertTrue(bootstrapRequests.isEmpty());
+        assertTrue(keyRefreshes.isEmpty());
+        bootstrapWorker.refresh();
+        assertEquals(List.of(1L), bootstrapRequests);
+        assertTrue(keyRefreshes.isEmpty());
+        assertEquals(KeyRefreshWorker.Result.APPLIED, keyWorker.refreshIfRequested());
+        assertEquals(List.of(1L), keyRefreshes);
     }
 
     private CachedAccess.Decision evaluation(BootstrapCache cache, UUID jti, Instant issued) {

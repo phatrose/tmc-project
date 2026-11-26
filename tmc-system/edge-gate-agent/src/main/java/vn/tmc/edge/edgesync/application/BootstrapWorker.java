@@ -8,7 +8,6 @@ import vn.tmc.edge.edgesync.domain.BootstrapProtocolException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class BootstrapWorker {
     public static final Duration POLL_INTERVAL = Duration.ofSeconds(30);
@@ -16,7 +15,6 @@ public final class BootstrapWorker {
     private final BootstrapPort transport;
     private final BootstrapCache cache;
     private final Clock clock;
-    private final AtomicBoolean refreshRequested = new AtomicBoolean();
 
     public BootstrapWorker(BootstrapPort transport, BootstrapCache cache, Clock clock) {
         this.transport = Objects.requireNonNull(transport);
@@ -24,26 +22,9 @@ public final class BootstrapWorker {
         this.clock = Objects.requireNonNull(clock);
     }
 
-    /** Scan-side signal. The background worker consumes it on its next tick. */
-    public void requestKeyRefresh() {
-        refreshRequested.set(true);
-    }
-
     public void refresh() {
-        boolean requested = refreshRequested.getAndSet(false);
-        try {
-            refresh(requested);
-        } catch (RuntimeException failure) {
-            if (requested) {
-                refreshRequested.set(true);
-            }
-            throw failure;
-        }
-    }
-
-    private void refresh(boolean requested) {
         var now = clock.instant();
-        long afterRevision = requested ? 0 : cache.snapshot()
+        long afterRevision = cache.snapshot()
                 .filter(snapshot -> snapshot.trustedAt(now)
                         && !snapshot.trustDeadline().isBefore(now.plus(BootstrapCache.RENEW_BELOW)))
                 .map(BootstrapCache.Snapshot::revision).orElse(0L);

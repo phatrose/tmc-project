@@ -20,6 +20,7 @@ import vn.tmc.edge.edgesync.application.CachedAccess;
 import vn.tmc.edge.edgesync.application.ConnectivityMonitor;
 import vn.tmc.edge.edgesync.application.EdgeOperations;
 import vn.tmc.edge.edgesync.application.HeartbeatWorker;
+import vn.tmc.edge.edgesync.application.KeyRefreshWorker;
 import vn.tmc.edge.edgesync.application.SyncWorker;
 import vn.tmc.edge.edgesync.domain.HeartbeatPort;
 import vn.tmc.edge.edgesync.domain.SyncTransportException;
@@ -62,7 +63,8 @@ class SqliteOperationsIT {
         cache.apply(full(clock.instant()));
         var worker = new BootstrapWorker(after -> { throw offline(); }, cache, clock);
         assertThrows(SyncTransportException.class, worker::refresh);
-        var access = new CachedAccess(cache, worker::requestKeyRefresh);
+        var keyWorker = new KeyRefreshWorker(() -> { throw offline(); }, cache);
+        var access = new CachedAccess(cache, keyWorker::requestRefresh);
         var allowed = access.evaluate(EMPLOYEE_ID, JTI, KID, OCCURRED_AT, GATE_ID, clock.instant());
         assertEquals(CachedAccess.Decision.ALLOW, allowed.decision());
         assertEquals(Direction.IN, allowed.gate().direction());

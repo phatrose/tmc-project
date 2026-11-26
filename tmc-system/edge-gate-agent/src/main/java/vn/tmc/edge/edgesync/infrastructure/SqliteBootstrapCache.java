@@ -78,6 +78,41 @@ public final class SqliteBootstrapCache implements BootstrapCache {
         });
     }
 
+    @Override
+    public ApplyResult applyKeySet(KeySet keySet) {
+        Instant now = Instant.ofEpochMilli(clock.millis());
+        BootstrapValidation.validateKeys(keySet, now);
+        return database.write(db -> {
+            var previous = metadata(db);
+            var existing = readSnapshot(db, previous);
+            if (existing.isEmpty() || !existing.orElseThrow().trustedAt(now)) {
+                return ApplyResult.FULL_REQUIRED;
+            }
+            var snapshot = existing.orElseThrow();
+            if (keySet.version() < snapshot.keySet().version()
+                    || keySet.generatedAt().isBefore(snapshot.keySet().generatedAt())) {
+                throw new BootstrapProtocolException("KeySet version or generation time moved backwards");
+            }
+            var updated = new Snapshot(identity, snapshot.revision(), snapshot.generatedAt(), snapshot.trustedUntil(),
+                    keySet, snapshot.policy(), snapshot.gates(), snapshot.revocations());
+            String edge = identity.edgeId().toString();
+            put(db, "trusted_signing_keys", edge, keySet);
+            try (var statement = db.prepareStatement("""
+                    UPDATE edge_runtime_state SET bootstrap_snapshot_hash = ?
+                    WHERE edge_id = ? AND factory_id = ? AND bootstrap_revision = ?
+                    """)) {
+                statement.setString(1, fingerprint(updated));
+                statement.setString(2, edge);
+                statement.setString(3, identity.factoryId().toString());
+                statement.setLong(4, snapshot.revision());
+                if (statement.executeUpdate() != 1) {
+                    throw new SQLException("Key refresh did not update provisioned runtime state");
+                }
+            }
+            return ApplyResult.APPLIED;
+        });
+    }
+
     private record Metadata(long revision, Instant generatedAt, Instant trustedUntil, String hash) {}
 
     private Metadata metadata(Connection db) throws SQLException {
