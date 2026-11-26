@@ -3,12 +3,14 @@ package vn.tmc.edge.edgesync.infrastructure;
 import vn.tmc.contracts.AttendancePayload;
 import vn.tmc.contracts.SyncBatchAck;
 import vn.tmc.contracts.SyncBatchRequest;
+import vn.tmc.edge.edgesync.api.CommandCompletion;
 import vn.tmc.edge.edgesync.api.CommandIntent;
 import vn.tmc.edge.edgesync.api.CommittedCommand;
 import vn.tmc.edge.edgesync.api.CommittedEvent;
 import vn.tmc.edge.edgesync.api.EventDraft;
 import vn.tmc.edge.edgesync.api.EventPayload;
 import vn.tmc.edge.edgesync.api.EventPayload.CommandMode;
+import vn.tmc.edge.edgesync.api.EventPayload.CommandStatus;
 import vn.tmc.edge.edgesync.api.EventPayload.ScanMode;
 import vn.tmc.edge.edgesync.api.EventStoreException;
 import vn.tmc.edge.edgesync.api.LocalEventStorePort;
@@ -165,6 +167,49 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal, Oper
             SqliteScans.insertCommand(connection, scanId, reservation, ScanMode.ONLINE, now, null, command, now);
             return new CommittedCommand(command.commandId(), now, Optional.of(command));
         });
+    }
+
+    @Override
+    public CommittedEvent recordCommandResult(UUID scanId, CommandCompletion completion) {
+        requireUuidV4(scanId, "scanId");
+        Objects.requireNonNull(completion, "completion");
+        return database.write(connection -> {
+            var stored = SqliteScans.loadCommandForScan(connection, scanId)
+                    .filter(command -> command.commandId().equals(completion.commandId()))
+                    .orElseThrow(() -> new EventStoreException(IDEMPOTENCY_CONFLICT));
+            if (stored.status() != CommandStatus.NOT_SENT) {
+                boolean matches = stored.status() == completion.status()
+                        && Objects.equals(stored.completedAt(), completion.completedAt())
+                        && Objects.equals(stored.code(), completion.code());
+                if (!matches || stored.resultEventId() == null) {
+                    throw new EventStoreException(IDEMPOTENCY_CONFLICT);
+                }
+                return SqliteEvents.find(connection, stored.resultEventId())
+                        .orElseThrow(() -> new SQLException("Stored command result event is missing"));
+            }
+            var edgeIdentity = resolveIdentity(connection, stored.attendanceEventId());
+            var payload = new EventPayload.GateCommandResult(stored.commandId(), stored.attendanceEventId(),
+                    stored.mode(), stored.operatorId(), stored.reason(),
+                    completion.status(), completion.completedAt(), completion.code());
+            var draft = new EventDraft(edgeIdentity.edgeId(), stored.gateId(), edgeIdentity.factoryId(),
+                    scanId, completion.completedAt(), payload);
+            var committed = SqliteEvents.insert(connection, draft, now());
+            SqliteScans.completeCommand(connection, stored.scanId(), stored.commandId(),
+                    completion, committed.envelope().eventId());
+            SqliteEvents.advanceSequence(connection, committed.envelope());
+            return committed;
+        });
+    }
+
+    private Identity resolveIdentity(java.sql.Connection connection, UUID attendanceEventId) throws SQLException {
+        if (identity != null) {
+            return identity;
+        }
+        if (attendanceEventId != null) {
+            return SqliteEvents.findIdentity(connection, attendanceEventId)
+                    .orElseThrow(() -> new SQLException("Attendance event for command result is missing"));
+        }
+        return SqliteScans.singleRuntimeIdentity(connection);
     }
 
     @Override

@@ -3,6 +3,7 @@ package vn.tmc.edge.edgesync.infrastructure;
 import vn.tmc.contracts.EventEnvelope;
 import vn.tmc.edge.edgesync.api.CommittedEvent;
 import vn.tmc.edge.edgesync.api.EventDraft;
+import vn.tmc.edge.edgesync.domain.BootstrapCache.Identity;
 
 import java.io.IOException;
 import java.sql.Connection;
@@ -96,6 +97,18 @@ final class SqliteEvents {
                     return Optional.empty();
                 }
                 return Optional.of(new CommittedEvent(envelope(result), Instant.ofEpochMilli(result.getLong("committed_at"))));
+            }
+        }
+    }
+
+    static Optional<Identity> findIdentity(Connection connection, UUID eventId) throws SQLException {
+        try (var statement = connection.prepareStatement("SELECT edge_id, factory_id FROM local_events WHERE event_id = ?")) {
+            statement.setString(1, eventId.toString());
+            try (var result = statement.executeQuery()) {
+                if (!result.next()) {
+                    return Optional.empty();
+                }
+                return Optional.of(new Identity(UUID.fromString(result.getString(1)), UUID.fromString(result.getString(2))));
             }
         }
     }

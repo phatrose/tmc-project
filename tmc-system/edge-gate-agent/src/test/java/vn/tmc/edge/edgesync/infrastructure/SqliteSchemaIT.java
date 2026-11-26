@@ -26,7 +26,7 @@ class SqliteSchemaIT {
         try (var connection = database.open(); var statement = connection.createStatement()) {
             assertEquals("wal", scalar(connection, "PRAGMA journal_mode"));
             assertEquals("2", scalar(connection, "PRAGMA synchronous")); // FULL
-            assertEquals("4", scalar(connection, "PRAGMA user_version"));
+            assertEquals("5", scalar(connection, "PRAGMA user_version"));
             try (var tables = statement.executeQuery("SELECT name FROM sqlite_schema WHERE type = 'table'")) {
                 Set<String> names = new HashSet<>();
                 while (tables.next()) {
@@ -49,7 +49,7 @@ class SqliteSchemaIT {
         var reopened = new SqliteDatabase(file);
         try (var connection = reopened.open()) {
             assertEquals("42", scalar(connection, "SELECT last_sequence_no FROM edge_runtime_state"));
-            assertEquals("4", scalar(connection, "PRAGMA user_version"));
+            assertEquals("5", scalar(connection, "PRAGMA user_version"));
         }
     }
 
@@ -69,8 +69,50 @@ class SqliteSchemaIT {
         }
         try (var connection = new SqliteDatabase(file).open()) {
             assertEquals("42", scalar(connection, "SELECT last_sequence_no FROM edge_runtime_state"));
-            assertEquals("4", scalar(connection, "PRAGMA user_version"));
+            assertEquals("5", scalar(connection, "PRAGMA user_version"));
             assertEquals("0", scalar(connection, "SELECT count(*) FROM local_sync_batches"));
+        }
+    }
+
+    @Test
+    void openingVersionFourDatabase_migratesToVersionFiveWithoutLosingData() throws Exception {
+        var file = tempDir.resolve("version-four.db");
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + file);
+             var statement = connection.createStatement()) {
+            for (String resource : new String[]{"/schema.sql", "/schema-v2.sql", "/schema-v3.sql", "/schema-v4.sql"}) {
+                try (var schema = SqliteSchemaIT.class.getResourceAsStream(resource)) {
+                    assertNotNull(schema, resource);
+                    for (String sql : new String(schema.readAllBytes(), StandardCharsets.UTF_8).split(";")) {
+                        if (!sql.isBlank()) {
+                            statement.execute(sql);
+                        }
+                    }
+                }
+            }
+            statement.execute("PRAGMA user_version=4");
+            statement.execute("INSERT INTO edge_runtime_state (edge_id, factory_id, last_sequence_no) VALUES ('edge', 'factory', 42)");
+            statement.execute("""
+                    INSERT INTO local_events (event_id, event_type, schema_version, edge_id, gate_id, factory_id,
+                        sequence_no, correlation_id, occurred_at, payload_sha256, payload_text, committed_at)
+                    VALUES ('event-1', 'attendance.event.recorded', 1, 'edge', 'gate', 'factory', 42, 'scan-1', 1000, '%s', '{}', 1000)
+                    """.formatted("0".repeat(64)));
+            statement.execute("INSERT INTO event_delivery (event_id, state) VALUES ('event-1', 'PENDING')");
+            statement.execute("""
+                    INSERT INTO local_scan_outcomes (scan_id, gate_id, input_fingerprint, decision, reason_code,
+                        event_id, command_id, command_status, occurred_at, mode, retain_until)
+                    VALUES ('scan-1', 'gate', '%s', 'ALLOW', 'OK', 'event-1', 'cmd-1', 'NOT_SENT', 1000, 'OFFLINE', 9000)
+                    """.formatted("1".repeat(64)));
+            statement.execute("""
+                    INSERT INTO local_gate_commands (command_id, scan_id, gate_id, mode, status, retain_until)
+                    VALUES ('cmd-1', 'scan-1', 'gate', 'QR', 'NOT_SENT', 9000)
+                    """);
+        }
+        try (var connection = new SqliteDatabase(file).open()) {
+            assertEquals("5", scalar(connection, "PRAGMA user_version"));
+            assertEquals("42", scalar(connection, "SELECT last_sequence_no FROM edge_runtime_state"));
+            assertEquals("PENDING", scalar(connection, "SELECT state FROM event_delivery WHERE event_id = 'event-1'"));
+            assertEquals("NOT_SENT", scalar(connection, "SELECT status FROM local_gate_commands WHERE command_id = 'cmd-1'"));
+            assertNull(scalar(connection, "SELECT result_event_id FROM local_gate_commands WHERE command_id = 'cmd-1'"));
         }
     }
 
