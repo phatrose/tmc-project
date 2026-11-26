@@ -8,19 +8,26 @@ import vn.tmc.edge.edgesync.domain.SyncTransportException;
 import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.net.URI;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.Objects;
+import java.util.function.Function;
 
 public final class RestBootstrapClient implements BootstrapPort {
     private final URI endpoint;
-    private final EdgeHttp http;
+    private final Function<HttpRequest, HttpResponse<byte[]>> sender;
 
     public RestBootstrapClient(URI endpoint, SSLContext deviceTls) {
+        this(endpoint, new EdgeHttp(Objects.requireNonNull(deviceTls))::send);
+    }
+
+    RestBootstrapClient(URI endpoint, Function<HttpRequest, HttpResponse<byte[]>> sender) {
         this.endpoint = Objects.requireNonNull(endpoint);
         EdgeHttp.request(endpoint);
         if (endpoint.getQuery() != null || endpoint.getFragment() != null) {
             throw new IllegalArgumentException("Bootstrap endpoint must omit query and fragment");
         }
-        http = new EdgeHttp(Objects.requireNonNull(deviceTls));
+        this.sender = Objects.requireNonNull(sender);
     }
 
     @Override
@@ -29,7 +36,7 @@ public final class RestBootstrapClient implements BootstrapPort {
             throw new IllegalArgumentException("Invalid bootstrap revision");
         }
         var url = URI.create(endpoint.toASCIIString() + "?afterRevision=" + afterRevision);
-        var response = http.send(EdgeHttp.request(url).GET().build());
+        var response = sender.apply(EdgeHttp.request(url).GET().build());
         if (response.statusCode() == 304) {
             try {
                 long revision = Long.parseLong(response.headers().firstValue("X-Revision").orElse(""));
@@ -45,7 +52,7 @@ public final class RestBootstrapClient implements BootstrapPort {
             throw new SyncTransportException(response.statusCode(), 0);
         }
         try {
-            var bundle = WireJson.read(response.body(), BootstrapResponse.class);
+            var bundle = WireJson.readResponse(response.body(), BootstrapResponse.class);
             if (bundle == null) {
                 throw new BootstrapProtocolException("Bootstrap body is missing");
             }

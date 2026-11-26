@@ -37,7 +37,7 @@ public final class RestKeyRefreshClient implements KeyRefreshPort {
             throw new SyncTransportException(response.statusCode(), 0);
         }
         try {
-            var keySet = WireJson.read(response.body(), KeySet.class);
+            var keySet = WireJson.readResponse(response.body(), KeySet.class);
             if (keySet == null) {
                 throw new BootstrapProtocolException("Key refresh body is missing");
             }

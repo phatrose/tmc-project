@@ -9,8 +9,12 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
 import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.type.LogicalType;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.IOException;
@@ -27,7 +31,12 @@ final class WireJson {
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
             .enable(DeserializationFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
+            .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
             .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+            .withCoercionConfig(LogicalType.Textual, config -> config
+                    .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
             .addModule(new JavaTimeModule().addSerializer(Instant.class, new JsonSerializer<>() {
                 @Override
                 public void serialize(Instant value, JsonGenerator generator, SerializerProvider provider) throws IOException {
@@ -51,6 +60,8 @@ final class WireJson {
                     throw context.weirdStringException(text, Instant.class, "Expected a UTC millisecond timestamp");
                 }
             })).build();
+    private static final ObjectReader RESPONSE_READER = MAPPER.reader()
+            .without(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
     private WireJson() {}
 
@@ -59,6 +70,14 @@ final class WireJson {
     }
 
     static <T> T read(byte[] body, Class<T> type) throws IOException {
+        return readStrict(body, type);
+    }
+
+    static <T> T readStrict(byte[] body, Class<T> type) throws IOException {
         return MAPPER.readValue(body, type);
+    }
+
+    static <T> T readResponse(byte[] body, Class<T> type) throws IOException {
+        return RESPONSE_READER.forType(type).readValue(body);
     }
 }
