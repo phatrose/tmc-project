@@ -135,19 +135,17 @@ export default function KioskPage() {
   const tone = view?.tone || 'idle';
   return <section aria-labelledby="kiosk-title">
     <div className="module-heading">
-      <span className="module-label">TRẠM CHẤM CÔNG TỰ ĐỘNG</span>
-      <h1 id="kiosk-title">Quét tại cổng</h1>
-      <p>Đưa mã QR vào trước camera — cổng sẽ tự động xác minh và mở khóa.</p>
+      <div>
+        <h1 id="kiosk-title">Quét tại cổng</h1>
+        <p>Đưa mã QR vào trước camera — cổng sẽ tự động xác minh và mở khóa.</p>
+      </div>
     </div>
 
     <div className="gs-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
       {cameraOn ? (
-        <div style={{ position: 'relative', width: '100%', maxWidth: 460, borderRadius: 14, overflow: 'hidden', border: '3px solid #0f766e', background: '#000' }}>
-          <video ref={videoRef} playsInline muted style={{ width: '100%', display: 'block' }} />
-          <div style={{
-            position: 'absolute', inset: '16%', border: '2px dashed rgba(255,255,255,0.9)',
-            borderRadius: 12, pointerEvents: 'none',
-          }} />
+        <div className="gs-camera-stage">
+          <video ref={videoRef} playsInline muted />
+          <div className="gs-camera-reticle" />
         </div>
       ) : (
         <div style={{ textAlign: 'center', padding: '16px 0' }}>
@@ -172,13 +170,28 @@ export default function KioskPage() {
     {history.length > 0 && (
       <div className="gs-panel">
         <h3>Phiên quét vừa ghi nhận ({history.length})</h3>
-        <ul>
-          {history.map((item) => (
-            <li key={item.id}>
-              <strong>{item.time}</strong> · <code>{item.direction}</code> · {item.decision} — {item.detail} ({item.ms} ms)
-            </li>
-          ))}
-        </ul>
+        <table className="gs-table">
+          <thead>
+            <tr>
+              <th>Thời gian</th>
+              <th>Chiều</th>
+              <th>Kết quả</th>
+              <th>Chi tiết</th>
+              <th>Độ trễ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.map((item) => (
+              <tr key={item.id}>
+                <td>{item.time}</td>
+                <td><code>{item.direction}</code></td>
+                <td>{item.decision}</td>
+                <td>{item.detail}</td>
+                <td>{item.ms} ms</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     )}
   </section>;

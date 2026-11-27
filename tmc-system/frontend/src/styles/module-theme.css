@@ -1,40 +1,32 @@
 /* PHỤ TRÁCH: Task 8. Ngôn ngữ giao diện dùng chung cho toàn bộ trang nghiệp vụ. */
 .workspace-page { max-width: 1320px; margin: 0 auto; }
-.workspace-page h1 { font-size: 26px; letter-spacing: -0.02em; color: var(--ink); }
-.workspace-page h2 { font-size: 18px; color: var(--ink); }
-.workspace-page h3 { font-size: 16px; color: var(--ink); }
+.workspace-page h1 { font-size: 1.5rem; letter-spacing: -0.02em; color: var(--ink); }
+.workspace-page h2 { font-size: 1.125rem; color: var(--ink); }
+.workspace-page h3 { font-size: 0.9375rem; color: var(--ink); }
 
-.module-label {
-  display: inline-block;
-  color: var(--accent);
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  font-weight: 800;
-  text-transform: uppercase;
-}
+.module-label { display: none; }
 .module-heading {
-  padding: 22px 26px;
-  background: linear-gradient(115deg, #e7f5f1 0%, #f8fbfa 100%);
+  padding: 18px 22px;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  margin-bottom: 20px;
+  border-radius: var(--radius-md);
+  margin-bottom: 18px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
 }
-.module-heading h1 { margin: 6px 0 4px; }
+.module-heading h1 { margin: 0 0 4px; }
 .module-heading p { margin: 0; font-size: 13.5px; color: var(--muted); }
 
 /* ── Shared Cards, Toolbars, KPI, Badges, Tables ───────────────────────────── */
 .tmc-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 20px 22px;
-  box-shadow: var(--shadow-sm);
-  margin-bottom: 18px;
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+  margin-bottom: 16px;
 }
 .tmc-toolbar {
   display: flex;
