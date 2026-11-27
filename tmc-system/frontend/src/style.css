@@ -1,37 +1,41 @@
-/* PHỤ TRÁCH: Task 8. Impeccable Operate-mode design system — Industrial Precision Slate & Deep Teal. */
+/* PHỤ TRÁCH: Task 8. TMC Design System (DESIGN.md) — Enterprise Dark-Sidebar + Modern Indigo + Crisp 8-10px. */
 :root {
-  --bg: #f5f7f8;
+  --bg: #f8fafc;
   --surface: #ffffff;
-  --surface-soft: #f8fafb;
-  --surface-tint: #eef5f4;
-  --sidebar-bg: #0c171b;
+  --surface-soft: #f1f5f9;
+  --surface-tint: #eef2ff;
+  --sidebar-bg: #0f172a;
   --sidebar-hover: rgba(255, 255, 255, 0.06);
-  --sidebar-active-bg: rgba(20, 184, 166, 0.14);
-  --sidebar-active-ink: #5eead4;
-  --sidebar-ink: #cbd8dd;
-  --sidebar-muted: #7c959e;
-  --ink: #0f1d24;
-  --ink-soft: #334a54;
-  --muted: #556b75;
-  --border: #e1e7eb;
-  --border-strong: #c5d1d8;
-  --accent: #0b6b63;
-  --accent-hover: #095650;
-  --accent-soft: #e6f4f2;
-  --accent-ink: #084c46;
-  --success-bg: #eaf7ef;
-  --success-border: #a7dfc0;
-  --success-ink: #125c35;
-  --warning-bg: #fef7e6;
-  --warning-border: #ead29c;
-  --warning-ink: #7a4c00;
-  --danger-bg: #fef0f0;
-  --danger-border: #f1b8b8;
-  --danger-ink: #a61c14;
+  --sidebar-active-bg: rgba(99, 102, 241, 0.18);
+  --sidebar-active-ink: #a5b4fc;
+  --sidebar-ink: #cbd5e1;
+  --sidebar-muted: #94a3b8;
+  --ink: #0f172a;
+  --ink-soft: #334155;
+  --muted: #64748b;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: #eef2ff;
+  --accent-ink: #3730a3;
+  --success-bg: #ecfdf5;
+  --success-border: #a7f3d0;
+  --success-ink: #065f46;
+  --warning-bg: #fffbeb;
+  --warning-border: #fde68a;
+  --warning-ink: #92400e;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
+  --danger-ink: #991b1b;
   --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --shadow-float: 0 18px 40px rgba(12, 23, 27, 0.12);
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --shadow-sm: none;
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.14);
+  --shadow-float: 0 18px 40px rgba(15, 23, 42, 0.14);
   font-family: "Be Vietnam Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   line-height: 1.55;
@@ -44,7 +48,7 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 ::selection {
-  background: rgba(11, 107, 99, 0.18);
+  background: rgba(79, 70, 229, 0.16);
   color: var(--ink);
 }
 
@@ -133,7 +137,7 @@ table {
   padding: 20px 14px 18px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .brand {
@@ -150,7 +154,7 @@ table {
 .brand-mark {
   width: 36px;
   height: 36px;
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--accent);
   color: #ffffff;
   display: grid;
@@ -191,7 +195,7 @@ table {
   align-items: center;
   gap: 10px;
   padding: 9px 11px;
-  border-radius: 8px;
+  border-radius: 7px;
   color: var(--sidebar-ink);
   text-decoration: none;
   font-size: 13.5px;
@@ -259,7 +263,7 @@ table {
 }
 
 .session-dot--online::before {
-  background: #2dd4bf;
+  background: #34d399;
 }
 
 .session-timer {
@@ -272,9 +276,9 @@ table {
 .sidebar .session button {
   width: 100%;
   background: rgba(255, 255, 255, 0.06);
-  color: #eef5f6;
+  color: #f1f5f9;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
+  border-radius: 7px;
   padding: 8px 12px;
   font-size: 13px;
   font-weight: 600;
@@ -344,7 +348,7 @@ main {
   height: 34px;
   background: var(--accent-soft);
   color: var(--accent-ink);
-  border: 1px solid #c3e3de;
+  border: 1px solid #c7d2fe;
   border-radius: 8px;
   font-size: 12px;
   font-weight: 700;
@@ -354,7 +358,7 @@ main {
 .welcome-panel {
   background: var(--sidebar-bg);
   color: #ffffff;
-  padding: 28px 32px;
+  padding: 26px 30px;
   border-radius: var(--radius-lg);
   margin-bottom: 20px;
   display: flex;
@@ -373,7 +377,7 @@ main {
 }
 
 .welcome-panel p {
-  color: #b7cfd4;
+  color: #cbd5e1;
   max-width: 58ch;
   margin: 0;
   font-size: 13.5px;
@@ -390,18 +394,18 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: #ffffff;
-  color: var(--sidebar-bg);
+  background: var(--accent);
+  color: #ffffff;
   text-decoration: none;
   padding: 9px 16px;
-  border-radius: 8px;
+  border-radius: 7px;
   font-weight: 600;
   font-size: 13.5px;
   transition: background-color 150ms ease;
 }
 
 .primary-link:hover {
-  background: #e6f4f2;
+  background: var(--accent-hover);
 }
 
 .secondary-link {
@@ -413,7 +417,7 @@ main {
   border: 1px solid rgba(255, 255, 255, 0.2);
   text-decoration: none;
   padding: 8px 15px;
-  border-radius: 8px;
+  border-radius: 7px;
   font-weight: 500;
   font-size: 13.5px;
   transition: background-color 150ms ease;
@@ -462,7 +466,7 @@ main {
 
 .module-card:hover {
   border-color: var(--accent);
-  background: #fcfefe;
+  background: #fafbff;
 }
 
 .module-card-top {
@@ -476,8 +480,8 @@ main {
 .module-card-icon {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
-  background: var(--surface-tint);
+  border-radius: 7px;
+  background: var(--accent-soft);
   color: var(--accent);
   display: grid;
   place-items: center;
@@ -495,7 +499,7 @@ main {
   border-radius: 999px;
 }
 .module-pill--live { background: var(--success-bg); color: var(--success-ink); }
-.module-pill--edge { background: #e8f1fb; color: #1d4ed8; }
+.module-pill--edge { background: var(--accent-soft); color: var(--accent-ink); }
 .module-pill--sim { background: var(--warning-bg); color: var(--warning-ink); }
 
 .module-card h2 {
@@ -532,7 +536,7 @@ input, select, textarea {
 
 input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(11, 107, 99, 0.14);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.14);
   outline: none;
 }
 
@@ -552,6 +556,7 @@ button {
 button:hover:not(:disabled) {
   background: var(--surface-tint);
   border-color: var(--accent);
+  color: var(--accent-ink);
 }
 
 button:disabled {
@@ -569,14 +574,14 @@ button:disabled {
   margin: 32px auto;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   overflow: hidden;
   box-shadow: var(--shadow-float);
 }
 
 .login-intro {
   background: var(--sidebar-bg);
-  color: #ecfdf5;
+  color: #f8fafc;
   padding: 40px 36px;
   display: flex;
   flex-direction: column;
@@ -590,7 +595,7 @@ button:disabled {
   height: 40px;
   background: var(--accent);
   color: #ffffff;
-  border-radius: 9px;
+  border-radius: 8px;
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -605,7 +610,7 @@ button:disabled {
 }
 
 .login-intro p {
-  color: #b7cfd4;
+  color: #cbd5e1;
   margin: 0;
   font-size: 14px;
 }
@@ -645,7 +650,7 @@ button:disabled {
   padding: 10px 16px;
   margin-top: 12px;
   font-weight: 600;
-  border-radius: 8px;
+  border-radius: 7px;
 }
 .primary-button:hover:not(:disabled) {
   background: var(--accent-hover);

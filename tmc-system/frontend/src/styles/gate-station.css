@@ -24,10 +24,10 @@
   position: relative;
   width: 100%;
   max-width: 440px;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
-  border: 2px solid var(--accent, #0b6b63);
-  background: #0c171b;
+  border: 2px solid var(--accent, #4f46e5);
+  background: #0f172a;
 }
 .gs-camera-stage video { width: 100%; display: block; }
 .gs-camera-reticle {

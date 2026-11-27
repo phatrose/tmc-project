@@ -129,17 +129,18 @@
   display: inline-flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 5px;
-  background: #e6eff0;
-  border-radius: 12px;
-  margin-bottom: 18px;
+  padding: 4px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  margin-bottom: 16px;
 }
 .tmc-tabs button {
   border: 0;
   background: transparent;
   color: var(--ink-soft);
-  padding: 9px 16px;
-  border-radius: 9px;
+  padding: 7px 14px;
+  border-radius: 6px;
   font-size: 13px;
   font-weight: 600;
 }
@@ -147,28 +148,28 @@
 .tmc-tabs button[aria-pressed="true"] {
   background: var(--surface);
   color: var(--accent);
-  box-shadow: 0 2px 6px rgba(15, 37, 42, 0.1);
+  border: 1px solid var(--border);
 }
 
 .workspace-page table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: 13.5px; }
 .workspace-page th {
-  background: #f1f6f6;
-  color: #4b656e;
+  background: var(--surface-soft);
+  color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  padding: 13px 16px;
+  padding: 11px 14px;
   text-align: left;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 .workspace-page td {
-  padding: 13px 16px;
-  border-bottom: 1px solid #edf2f3;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
-.workspace-page tbody tr:hover { background: #f8fbfb; }
+.workspace-page tbody tr:hover { background: #fafbff; }
 .data-table-scroll, .t4-table {
   max-width: 100%;
   overflow-x: auto;
@@ -251,12 +252,11 @@
 .qr-frame {
   width: 284px;
   max-width: 100%;
-  margin: 24px auto 18px;
-  padding: 20px;
-  border: 1px solid #cce3dc;
-  border-radius: 20px;
+  margin: 22px auto 16px;
+  padding: 18px;
+  border: 1px solid #c7d2fe;
+  border-radius: 12px;
   background: #ffffff;
-  box-shadow: 0 0 0 8px #edf7f4;
 }
 .qr-frame svg { display: block; width: 100%; height: auto; border: 0 !important; border-radius: 0 !important; }
 .qr-progress-track {
@@ -264,13 +264,13 @@
   max-width: 100%;
   height: 6px;
   margin: 0 auto 14px;
-  background: #e3eeeb;
+  background: var(--surface-soft);
   border-radius: 999px;
   overflow: hidden;
 }
 .qr-progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, #14b8a6, #0f766e);
+  background: var(--accent);
   transition: width 0.5s linear;
 }
 .qr-meta { font-size: 13.5px; color: var(--ink-soft); margin: 0 0 18px; font-variant-numeric: tabular-nums; }
