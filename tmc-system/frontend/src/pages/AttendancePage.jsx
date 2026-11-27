@@ -1,4 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { request } from '../api.js';
+import { createAttendanceApi } from './attendanceApi.js';
+
+const attendanceApi = createAttendanceApi(request);
 
 /**
  * PHỤ TRÁCH: Task 3.
@@ -13,9 +17,11 @@ const USERS = [
   { id: 'AUD001', name: 'Phạm Minh Đức', role: 'AUDITOR', roleTitle: 'Kiểm toán viên (Auditor)', dept: 'Ban Kiểm toán' }
 ];
 
-export default function AttendancePage() {
+export default function AttendancePage({ session } = {}) {
   const [currentUser, setCurrentUser] = useState(USERS[0]);
   const [activeTab, setActiveTab] = useState('daily');
+  const [apiStatus, setApiStatus] = useState('idle');
+  const [apiMessage, setApiMessage] = useState('');
 
   const [events, setEvents] = useState([
     {
@@ -192,6 +198,38 @@ export default function AttendancePage() {
   const [formSuccess, setFormSuccess] = useState('');
   const [selectedMonth, setSelectedMonth] = useState('2026-11');
   const [simulatorStatus, setSimulatorStatus] = useState('');
+
+  useEffect(() => {
+    if (!session) return undefined;
+    const controller = new AbortController();
+    setApiStatus('loading');
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const fromDate = `${selectedMonth}-01`;
+    const nextMonth = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, '0')}-01`;
+    Promise.all([
+      attendanceApi.listEvents({ page: 0, size: 50, signal: controller.signal }),
+      attendanceApi.listRecords({ from: fromDate, to: nextMonth, page: 0, size: 50, signal: controller.signal }),
+      attendanceApi.listAdjustments({ page: 0, size: 50, signal: controller.signal }),
+    ])
+      .then(([evPage, recPage, adjPage]) => {
+        if (Array.isArray(evPage?.items) && evPage.items.length > 0) setEvents(evPage.items);
+        if (Array.isArray(recPage?.items) && recPage.items.length > 0) setDailyRecords(recPage.items);
+        if (Array.isArray(adjPage?.items) && adjPage.items.length > 0) setAdjustments(adjPage.items);
+        setApiStatus('connected');
+        const totalLive = (evPage?.items?.length || 0) + (recPage?.items?.length || 0) + (adjPage?.items?.length || 0);
+        setApiMessage(
+          totalLive > 0
+            ? `Đã đồng bộ từ Central API (${evPage?.items?.length || 0} sự kiện, ${recPage?.items?.length || 0} ngày công, ${adjPage?.items?.length || 0} điều chỉnh).`
+            : 'Đã kết nối Central API (chưa có dữ liệu công thực tế trong kỳ này — hiển thị dữ liệu mẫu tham chiếu).'
+        );
+      })
+      .catch((err) => {
+        if (err?.name === 'AbortError') return;
+        setApiStatus('error');
+        setApiMessage(`Không thể tải dữ liệu chấm công từ Central API (${err?.message || 'lỗi kết nối'}).`);
+      });
+    return () => controller.abort();
+  }, [session, selectedMonth]);
 
   const kpiData = useMemo(() => {
     const filtered = dailyRecords.filter((r) => r.workDate.startsWith(selectedMonth));

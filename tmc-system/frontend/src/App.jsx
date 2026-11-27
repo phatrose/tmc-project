@@ -44,7 +44,7 @@ const MODULE_META = {
   reports: { kind: 'live', badge: 'Đã kết nối', desc: 'Báo cáo chấm công, xuất CSV/XLSX/PDF, kỳ Payroll và kiểm toán.' },
   kiosk: { kind: 'edge', badge: 'Edge LAN', desc: 'Màn hình quét QR tại cổng, hoạt động độc lập cả khi mất WAN.' },
   guard: { kind: 'edge', badge: 'Edge LAN', desc: 'Mở cổng thủ công / khẩn cấp có re-auth và theo dõi hiện diện.' },
-  attendance: { kind: 'sim', badge: 'Mô phỏng', desc: 'Bảng công ngày, sự kiện quẹt thẻ, điều chỉnh công và giả lập sync.' },
+  attendance: { kind: 'live', badge: 'Đã kết nối', desc: 'Bảng công ngày, sự kiện quẹt thẻ, điều chỉnh công và giả lập sync.' },
   administration: { kind: 'sim', badge: 'Mô phỏng', desc: 'Nhà máy, cổng turnstile, ca làm việc, cấu hình và DSR.' },
 };
 
