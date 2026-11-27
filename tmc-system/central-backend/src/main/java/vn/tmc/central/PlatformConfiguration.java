@@ -39,11 +39,13 @@ public class PlatformConfiguration {
         return username -> { throw new UsernameNotFoundException("Authentication not configured"); };
     }
     @Bean
+    @org.springframework.context.annotation.Profile("!integration-preview")
     @ConditionalOnMissingBean(PasswordEncoder.class)
-    PasswordEncoder passwordEncoder() {
+    PasswordEncoder fallbackPasswordEncoder() {
         return new BCryptPasswordEncoder();
     }
     @Bean
+    @org.springframework.context.annotation.Profile("!integration-preview")
     @ConditionalOnMissingBean(TokenIssuerPort.class)
     TokenIssuerPort fallbackActionGrantIssuer() {
         return (id, role, scopes) -> {
