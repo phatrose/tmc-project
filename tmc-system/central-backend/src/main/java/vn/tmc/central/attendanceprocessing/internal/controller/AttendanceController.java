@@ -121,8 +121,7 @@ public final class AttendanceController {
     ) {
         ActorContext context = resolveActor();
         if (!ActorContext.SCOPE_GLOBAL.equals(context.scope())
-                && !context.factoryIds().isEmpty()
-                && !context.factoryIds().contains(factoryId.toString())) {
+                && (context.factoryIds().isEmpty() || !context.factoryIds().contains(factoryId.toString()))) {
             throw new SecurityException("Không có quyền xem hiện diện của nhà máy ngoài phạm vi được gán.");
         }
         PresenceView presence = queryService.getPresence(factoryId);
@@ -177,9 +176,25 @@ public final class AttendanceController {
     @PostMapping("/adjustments/{id}/decision")
     public ResponseEntity<Adjustment> decideAdjustment(
             @PathVariable("id") UUID id,
-            @RequestBody AdjustmentDecision decision
+            @RequestBody AdjustmentDecision decision,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey
     ) {
         ActorContext context = resolveActor();
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            String cacheKey = context.userId() + "|POST:/api/v1/attendance/adjustments/" + id + "/decision|" + idempotencyKey.trim();
+            String hash = sha256(id + "|" + decision);
+            Instant now = Instant.now();
+            CachedAdjustment existing = adjustmentIdempotency.get(cacheKey);
+            if (existing != null && now.isBefore(existing.expiresAt())) {
+                if (!existing.payloadHash().equals(hash)) {
+                    throw new IdempotencyConflictException("Idempotency-Key đã được dùng với quyết định điều chỉnh khác.");
+                }
+                return ResponseEntity.ok(existing.adjustment());
+            }
+            Adjustment updated = queryService.decideAdjustment(context, id, decision);
+            adjustmentIdempotency.put(cacheKey, new CachedAdjustment(hash, updated, now.plus(48, ChronoUnit.HOURS)));
+            return ResponseEntity.ok(updated);
+        }
         Adjustment updated = queryService.decideAdjustment(context, id, decision);
         return ResponseEntity.ok(updated);
     }

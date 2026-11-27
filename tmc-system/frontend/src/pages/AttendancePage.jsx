@@ -249,15 +249,18 @@ export default function AttendancePage({ session } = {}) {
       attendanceApi.listAdjustments({ page: 0, size: 50, signal: controller.signal }),
     ])
       .then(([evPage, recPage, adjPage]) => {
-        if (Array.isArray(evPage?.items) && evPage.items.length > 0) setEvents(evPage.items);
-        if (Array.isArray(recPage?.items) && recPage.items.length > 0) setDailyRecords(recPage.items);
-        if (Array.isArray(adjPage?.items) && adjPage.items.length > 0) setAdjustments(adjPage.items);
+        const liveEvents = Array.isArray(evPage?.items) ? evPage.items : [];
+        const liveRecords = Array.isArray(recPage?.items) ? recPage.items : [];
+        const liveAdjustments = Array.isArray(adjPage?.items) ? adjPage.items : [];
+        setEvents(liveEvents);
+        setDailyRecords(liveRecords);
+        setAdjustments(liveAdjustments);
         setApiStatus('connected');
-        const totalLive = (evPage?.items?.length || 0) + (recPage?.items?.length || 0) + (adjPage?.items?.length || 0);
+        const totalLive = liveEvents.length + liveRecords.length + liveAdjustments.length;
         setApiMessage(
           totalLive > 0
-            ? `Đã đồng bộ từ Central API (${evPage?.items?.length || 0} sự kiện, ${recPage?.items?.length || 0} ngày công, ${adjPage?.items?.length || 0} điều chỉnh).`
-            : 'Đã kết nối Central API (chưa có dữ liệu công thực tế trong kỳ này — hiển thị dữ liệu mẫu tham chiếu).'
+            ? `Đã đồng bộ từ Central API (${liveEvents.length} sự kiện, ${liveRecords.length} ngày công, ${liveAdjustments.length} điều chỉnh).`
+            : 'Đã kết nối Central API — chưa có dữ liệu công thực tế trong kỳ này.'
         );
       })
       .catch((err) => {
@@ -278,7 +281,7 @@ export default function AttendancePage({ session } = {}) {
     return { totalHours, completedDays, lateDays, earlyDays, anomalyCount };
   }, [dailyRecords, selectedMonth]);
 
-  const handleCreateAdjustment = (e) => {
+  const handleCreateAdjustment = async (e) => {
     e.preventDefault();
     setFormError('');
     setFormSuccess('');
@@ -286,83 +289,53 @@ export default function AttendancePage({ session } = {}) {
       setFormError('Lý do điều chỉnh phải dài tối thiểu 10 ký tự theo CONTRACT-V1 §9.');
       return;
     }
-    const typeNames = {
-      ADD_IN: 'Bổ sung giờ vào',
-      ADD_OUT: 'Bổ sung giờ ra',
-      MODIFY_HOURS: 'Chỉnh sửa giờ công',
-      EXCUSE_LATE: 'Miễn trừ đi trễ',
-      EXCUSE_EARLY: 'Miễn trừ về sớm'
-    };
-    const newAdj = {
-      id: `ADJ-${Date.now().toString().slice(-6)}`,
-      employeeId: currentUser.id,
-      workDate: formWorkDate,
-      adjustmentType: formType,
-      adjustmentTypeName: typeNames[formType],
-      requestedTime: `${formWorkDate} ${formTime}:00`,
-      adjustedHours: 8.0,
-      reason: formReason.trim(),
-      status: 'PENDING',
-      requestedBy: currentUser.id,
-      requestedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      reviewedBy: null,
-      reviewedAt: null,
-      reviewNote: null
-    };
-    setAdjustments([newAdj, ...adjustments]);
-    setFormReason('');
-    setFormSuccess('Đã gửi yêu cầu điều chỉnh (trạng thái PENDING).');
+    const proposedDirection = formType === 'ADD_IN' ? 'IN' : formType === 'ADD_OUT' ? 'OUT' : null;
+    const proposedOccurredAt = new Date(`${formWorkDate}T${formTime}:00+07:00`).toISOString();
+    try {
+      const created = await attendanceApi.createAdjustment(
+        {
+          eventId: null,
+          proposedOccurredAt,
+          proposedDirection,
+          reason: formReason.trim(),
+        },
+        crypto.randomUUID()
+      );
+      setAdjustments((prev) => [created, ...prev]);
+      setFormReason('');
+      setFormSuccess(`Đã gửi yêu cầu điều chỉnh lên hệ thống (trạng thái ${created.state || created.status || 'PENDING'}).`);
+    } catch (err) {
+      setFormError(err?.message || 'Không thể gửi yêu cầu điều chỉnh lên Central API.');
+    }
   };
 
-  const handleReviewAdjustment = (adjId, approved) => {
+  const handleReviewAdjustment = async (adjId, approved) => {
     const adj = adjustments.find((a) => a.id === adjId);
     if (!adj) return;
     if (currentUser.role === 'AUDITOR') {
       window.alert('Auditor chỉ có quyền tra cứu, cấm phê duyệt hoặc từ chối điều chỉnh công.');
       return;
     }
-    if (adj.requestedBy.toLowerCase() === currentUser.id.toLowerCase()) {
+    const requester = String(adj.requestedBy || adj.employeeId || '');
+    if (requester && requester.toLowerCase() === String(currentUser.id || '').toLowerCase()) {
       window.alert('Người tạo không được tự phê duyệt yêu cầu điều chỉnh của chính mình.');
       return;
     }
-    if (currentUser.role !== 'SUPERVISOR' && currentUser.role !== 'HR') {
-      window.alert('Chỉ Quản lý (Supervisor) hoặc Nhân sự (HR) mới có quyền duyệt.');
+    if (currentUser.role !== 'SUPERVISOR' && currentUser.role !== 'HR' && currentUser.role !== 'ADMIN') {
+      window.alert('Chỉ Quản lý (Supervisor), Nhân sự (HR) hoặc Quản trị viên mới có quyền duyệt.');
       return;
     }
-    const reviewNote = window.prompt(approved ? 'Nhập ghi chú phê duyệt (tùy chọn):' : 'Nhập lý do từ chối:') || '';
-    setAdjustments(
-      adjustments.map((a) =>
-        a.id === adjId
-          ? {
-              ...a,
-              status: approved ? 'APPROVED' : 'REJECTED',
-              reviewedBy: currentUser.id,
-              reviewedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
-              reviewNote
-            }
-          : a
-      )
-    );
-    if (approved) {
-      setDailyRecords(
-        dailyRecords.map((d) => {
-          if (d.workDate === adj.workDate && d.employeeId === adj.employeeId) {
-            const updated = { ...d, isAdjusted: true };
-            if (adj.adjustmentType === 'ADD_OUT') {
-              updated.lastOut = adj.requestedTime;
-              updated.isMissingSwipe = false;
-              updated.hoursWorked = 8.0;
-              updated.anomalyFlags = d.anomalyFlags.filter((f) => f !== 'MISSING_OUT');
-            } else if (adj.adjustmentType === 'EXCUSE_LATE') {
-              updated.isLate = false;
-              updated.lateMinutes = 0;
-              updated.anomalyFlags = d.anomalyFlags.filter((f) => f !== 'LATE_ARRIVAL');
-            }
-            return updated;
-          }
-          return d;
-        })
-      );
+    const reviewNote = window.prompt(approved ? 'Nhập ghi chú phê duyệt:' : 'Nhập lý do từ chối:');
+    if (reviewNote === null) return;
+    try {
+      const updated = await attendanceApi.decideAdjustment(adjId, {
+        decision: approved ? 'APPROVE' : 'REJECT',
+        reason: reviewNote.trim() || (approved ? 'Đã xác nhận và phê duyệt' : 'Không đủ căn cứ phê duyệt'),
+        version: adj.version || 1,
+      });
+      setAdjustments((prev) => prev.map((a) => (a.id === adjId ? updated : a)));
+    } catch (err) {
+      window.alert(`Không thể cập nhật quyết định: ${err?.message || 'lỗi hệ thống'}`);
     }
   };
 

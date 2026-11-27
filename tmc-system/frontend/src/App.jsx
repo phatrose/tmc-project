@@ -15,9 +15,11 @@ import { createReportsApi } from './pages/reportsApi.js';
 import RequestState from './components/RequestState.jsx';
 import AppErrorBoundary from './components/AppErrorBoundary.jsx';
 
+const API_BASE = import.meta.env?.VITE_API_BASE_URL ?? '/api/v1';
+
 const reportsApi = createReportsApi(request, async (path, { signal } = {}) => {
   if (!/^\/(reports|audit)\/exports\/[0-9a-f-]+\/file$/.test(path)) throw new Error('Invalid export path');
-  const response = await fetch('/api/v1' + path, {
+  const response = await fetch(API_BASE + path, {
     signal,
     credentials: 'omit',
     redirect: 'error',

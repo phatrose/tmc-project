@@ -15,6 +15,8 @@ async function fetchQrToken(accessToken) {
   const requestId = crypto.randomUUID();
   const response = await fetch(`${API_BASE}/me/qr-token`, {
     method: 'GET',
+    credentials: 'omit',
+    redirect: 'error',
     cache: 'no-store',
     headers: {
       Authorization: `Bearer ${accessToken}`,

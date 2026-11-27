@@ -12,37 +12,56 @@ export default function AdministrationPage({ session } = {}) {
   const [activeTab, setActiveTab] = useState('gates');
   const [selectedFactory, setSelectedFactory] = useState('ALL');
   const [notification, setNotification] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const roles = session?.actor?.roles || [];
+  const canMutate = roles.includes('ADMIN') && !roles.includes('AUDITOR');
+
+  const [gates, setGates] = useState([]);
+  const [shifts, setShifts] = useState([]);
+  const [holidays, setHolidays] = useState([]);
+  const [configs, setConfigs] = useState([]);
+  const [devices, setDevices] = useState([]);
+  const [dsrList, setDsrList] = useState([]);
 
   useEffect(() => {
     if (!session) return undefined;
     const controller = new AbortController();
+    setLoading(true);
+    setLoadError('');
     Promise.all([
       adminApi.listGates({ signal: controller.signal }),
+      adminApi.listShifts({ signal: controller.signal }),
+      adminApi.listHolidays({ signal: controller.signal }),
       adminApi.listConfigurations({ signal: controller.signal }),
+      adminApi.listDevices({ signal: controller.signal }),
       adminApi.listDsr({ signal: controller.signal }),
     ])
-      .then(([liveGates, liveConfigs, liveDsr]) => {
-        if (Array.isArray(liveGates) && liveGates.length > 0) setGates(liveGates);
-        if (Array.isArray(liveConfigs) && liveConfigs.length > 0) {
-          setConfigs(liveConfigs.map((c) => ({
-            key: c.key,
-            value: c.value,
-            category: c.category || 'SYSTEM',
-            desc: c.description || c.desc || '',
-          })));
-        }
-        if (Array.isArray(liveDsr) && liveDsr.length > 0) setDsrList(liveDsr);
+      .then(([liveGates, liveShifts, liveHolidays, liveConfigs, liveDevices, liveDsr]) => {
+        setGates(Array.isArray(liveGates) ? liveGates : []);
+        setShifts(Array.isArray(liveShifts) ? liveShifts : []);
+        setHolidays(Array.isArray(liveHolidays) ? liveHolidays : []);
+        setConfigs(
+          Array.isArray(liveConfigs)
+            ? liveConfigs.map((c) => ({
+                key: c.key,
+                value: c.value,
+                category: c.category || 'SYSTEM',
+                desc: c.description || c.desc || '',
+              }))
+            : []
+        );
+        setDevices(Array.isArray(liveDevices) ? liveDevices : []);
+        setDsrList(Array.isArray(liveDsr) ? liveDsr : []);
       })
-      .catch(() => {});
+      .catch((err) => {
+        if (err?.name === 'AbortError') return;
+        setLoadError(err?.message || 'Không thể tải dữ liệu quản trị từ Central Backend.');
+      })
+      .finally(() => setLoading(false));
     return () => controller.abort();
   }, [session]);
-
-  const [gates, setGates] = useState([
-    { id: 'GATE-BD-01', factoryId: 'FACTORY-BD', edgeId: 'EDGE-BD-01', name: 'Cổng chính 1 - Vào', direction: 'IN', turnstileApiId: 'TURNSTILE-BD-01-IN', status: 'ACTIVE' },
-    { id: 'GATE-BD-02', factoryId: 'FACTORY-BD', edgeId: 'EDGE-BD-01', name: 'Cổng chính 2 - Ra', direction: 'OUT', turnstileApiId: 'TURNSTILE-BD-02-OUT', status: 'ACTIVE' },
-    { id: 'GATE-LA-01', factoryId: 'FACTORY-LA', edgeId: 'EDGE-LA-01', name: 'Cổng xưởng A - Vào', direction: 'IN', turnstileApiId: 'TURNSTILE-LA-01-IN', status: 'ACTIVE' },
-    { id: 'GATE-LA-02', factoryId: 'FACTORY-LA', edgeId: 'EDGE-LA-01', name: 'Cổng xưởng A - Ra', direction: 'OUT', turnstileApiId: 'TURNSTILE-LA-02-OUT', status: 'ACTIVE' }
-  ]);
 
   const [newGate, setNewGate] = useState({
     id: '',
@@ -53,49 +72,6 @@ export default function AdministrationPage({ session } = {}) {
     turnstileApiId: ''
   });
   const [showAddGateModal, setShowAddGateModal] = useState(false);
-
-  const [shifts] = useState([
-    { id: 'SHIFT-BD-01', factoryId: 'FACTORY-BD', name: 'Ca 1 - Hành chính', startsAt: '08:00', endsAt: '17:00', isOvernight: false, graceLate: 15 },
-    { id: 'SHIFT-BD-02', factoryId: 'FACTORY-BD', name: 'Ca 2 - Chiều', startsAt: '14:00', endsAt: '22:00', isOvernight: false, graceLate: 15 },
-    { id: 'SHIFT-BD-03', factoryId: 'FACTORY-BD', name: 'Ca 3 - Ca đêm', startsAt: '22:00', endsAt: '06:00', isOvernight: true, graceLate: 15 },
-    { id: 'SHIFT-LA-01', factoryId: 'FACTORY-LA', name: 'Ca 1 - Hành chính', startsAt: '07:30', endsAt: '16:30', isOvernight: false, graceLate: 15 },
-    { id: 'SHIFT-LA-02', factoryId: 'FACTORY-LA', name: 'Ca 2 - Chiều', startsAt: '15:00', endsAt: '23:00', isOvernight: false, graceLate: 15 },
-    { id: 'SHIFT-LA-03', factoryId: 'FACTORY-LA', name: 'Ca 3 - Ca đêm', startsAt: '23:00', endsAt: '07:00', isOvernight: true, graceLate: 15 }
-  ]);
-
-  const [holidays] = useState([
-    { id: 'HOL-01', name: 'Tết Dương lịch', date: '2026-01-01', paid: true },
-    { id: 'HOL-02', name: 'Giỗ Tổ Hùng Vương', date: '2026-04-18', paid: true },
-    { id: 'HOL-03', name: 'Ngày Chiến thắng 30/4', date: '2026-04-30', paid: true },
-    { id: 'HOL-04', name: 'Quốc tế Lao động 1/5', date: '2026-05-01', paid: true },
-    { id: 'HOL-05', name: 'Quốc khánh 2/9', date: '2026-09-02', paid: true }
-  ]);
-
-  const [configs, setConfigs] = useState([
-    { key: 'system.timezone.default', value: 'Asia/Ho_Chi_Minh', category: 'SYSTEM', desc: 'Múi giờ vận hành chốt công nhà máy' },
-    { key: 'attendance.duplicate-scan-window-seconds', value: '30', category: 'ATTENDANCE', desc: 'Cửa sổ chống quét lặp nghiệp vụ 30s (BR-03)' },
-    { key: 'attendance.period-closing-time', value: '06:30', category: 'ATTENDANCE', desc: 'Giờ chốt kỳ công ngày 01 hàng tháng' },
-    { key: 'attendance.hr-export-deadline', value: '12:00', category: 'ATTENDANCE', desc: 'Hạn chót xuất bảng công sang HR ngày 01' },
-    { key: 'hr.payroll.endpoint', value: 'https://hr-mock.tmc.internal/api/v1/payroll', category: 'INTEGRATION', desc: 'Endpoint hệ thống HR/Payroll' },
-    { key: 'edge.sync.batch-size-max', value: '50', category: 'INTEGRATION', desc: 'Số sự kiện tối đa trong 1 lô sync' },
-    { key: 'retention.online-years', value: '2', category: 'RETENTION', desc: 'Số năm lưu trữ trực tuyến tối thiểu' },
-    { key: 'retention.archive-years', value: '5', category: 'RETENTION', desc: 'Số năm lưu trữ kho lạnh (Cold Archive)' },
-    { key: 'retention.anonymize-inactive-months', value: '36', category: 'RETENTION', desc: 'Thời hạn ẩn danh hồ sơ sau nghỉ việc (BR-11)' }
-  ]);
-
-  const [devices] = useState([
-    { deviceId: 'EDGE-BD-01', deviceType: 'EDGE_NODE', name: 'Edge Node Bình Dương 01', factoryId: 'FACTORY-BD', status: 'ONLINE', ip: '192.168.10.10', ping: '12ms', lastHeartbeat: 'Vừa xong' },
-    { deviceId: 'GATE-BD-01', deviceType: 'GATE', name: 'Turnstile Cổng Chính BD 01 (Vào)', factoryId: 'FACTORY-BD', status: 'ONLINE', ip: '192.168.10.21', ping: '15ms', lastHeartbeat: 'Vừa xong' },
-    { deviceId: 'GATE-BD-02', deviceType: 'GATE', name: 'Turnstile Cổng Chính BD 02 (Ra)', factoryId: 'FACTORY-BD', status: 'ONLINE', ip: '192.168.10.22', ping: '14ms', lastHeartbeat: 'Vừa xong' },
-    { deviceId: 'EDGE-LA-01', deviceType: 'EDGE_NODE', name: 'Edge Node Long An 01', factoryId: 'FACTORY-LA', status: 'ONLINE', ip: '192.168.20.10', ping: '18ms', lastHeartbeat: 'Vừa xong' },
-    { deviceId: 'GATE-LA-01', deviceType: 'GATE', name: 'Turnstile Cổng Xưởng LA 01 (Vào)', factoryId: 'FACTORY-LA', status: 'ONLINE', ip: '192.168.20.21', ping: '20ms', lastHeartbeat: 'Vừa xong' },
-    { deviceId: 'GATE-LA-02', deviceType: 'GATE', name: 'Turnstile Cổng Xưởng LA 02 (Ra)', factoryId: 'FACTORY-LA', status: 'ONLINE', ip: '192.168.20.22', ping: '19ms', lastHeartbeat: 'Vừa xong' }
-  ]);
-
-  const [dsrList, setDsrList] = useState([
-    { id: 'DSR-2026-001', employeeId: 'EMP-0099', requestType: 'ACCESS', status: 'COMPLETED', reason: 'Yêu cầu trích xuất dữ liệu quẹt thẻ cá nhân', processedBy: 'admin_tmc' },
-    { id: 'DSR-2026-002', employeeId: 'EMP-0145', requestType: 'ERASURE', status: 'PENDING', reason: 'Nhân viên nghỉ việc yêu cầu ẩn danh thông tin cá nhân', processedBy: '—' }
-  ]);
   const [newDsr, setNewDsr] = useState({ employeeId: '', requestType: 'ACCESS', reason: '' });
 
   const showToast = (msg) => {
@@ -103,69 +79,103 @@ export default function AdministrationPage({ session } = {}) {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  const handleToggleGateStatus = (gateId) => {
-    setGates((prev) =>
-      prev.map((g) => {
-        if (g.id !== gateId) return g;
-        const nextStatus = g.status === 'ACTIVE' ? 'MAINTENANCE' : g.status === 'MAINTENANCE' ? 'INACTIVE' : 'ACTIVE';
-        showToast(`Đã chuyển trạng thái cổng ${gateId} sang ${nextStatus}`);
-        return { ...g, status: nextStatus };
-      })
-    );
+  const handleToggleGateStatus = async (gateId) => {
+    const current = gates.find((g) => g.id === gateId);
+    if (!current) return;
+    const nextStatus = current.status === 'ACTIVE' ? 'MAINTENANCE' : current.status === 'MAINTENANCE' ? 'INACTIVE' : 'ACTIVE';
+    try {
+      const updated = await adminApi.updateGateStatus(gateId, nextStatus);
+      setGates((prev) => prev.map((g) => (g.id === gateId ? updated : g)));
+      showToast(`Đã cập nhật trạng thái cổng ${gateId} sang ${updated.status}`);
+    } catch (err) {
+      showToast(`Lỗi cập nhật cổng ${gateId}: ${err?.message || 'không thể lưu'}`);
+    }
   };
 
-  const handleAddGate = (e) => {
+  const handleAddGate = async (e) => {
     e.preventDefault();
     if (!newGate.id || !newGate.turnstileApiId) return;
-    if (gates.some((g) => g.turnstileApiId.toLowerCase() === newGate.turnstileApiId.toLowerCase())) {
-      window.alert(`Turnstile API ID '${newGate.turnstileApiId}' đã tồn tại!`);
-      return;
+    try {
+      const created = await adminApi.registerGate(newGate);
+      setGates((prev) => [...prev, created]);
+      setShowAddGateModal(false);
+      setNewGate({ id: '', factoryId: 'FACTORY-BD', edgeId: 'EDGE-BD-01', name: '', direction: 'IN', turnstileApiId: '' });
+      showToast(`Đăng ký cổng mới ${created.id} thành công!`);
+    } catch (err) {
+      showToast(`Không thể đăng ký cổng: ${err?.message || 'lỗi dữ liệu'}`);
     }
-    setGates((prev) => [...prev, { ...newGate, status: 'ACTIVE' }]);
-    setShowAddGateModal(false);
-    setNewGate({ id: '', factoryId: 'FACTORY-BD', edgeId: 'EDGE-BD-01', name: '', direction: 'IN', turnstileApiId: '' });
-    showToast(`Đăng ký cổng mới ${newGate.id} thành công!`);
   };
 
-  const handleAddDsr = (e) => {
+  const handleSaveConfigs = async () => {
+    try {
+      const updated = await Promise.all(configs.map((c) => adminApi.updateConfiguration(c.key, c.value)));
+      setConfigs(
+        updated.map((c) => ({
+          key: c.key,
+          value: c.value,
+          category: c.category || 'SYSTEM',
+          desc: c.description || c.desc || '',
+        }))
+      );
+      showToast('Đã lưu toàn bộ cấu hình lên Central Backend.');
+    } catch (err) {
+      showToast(`Không thể lưu cấu hình: ${err?.message || 'lỗi hệ thống'}`);
+    }
+  };
+
+  const handleAddDsr = async (e) => {
     e.preventDefault();
     if (!newDsr.employeeId) return;
-    const item = {
-      id: `DSR-2026-${String(dsrList.length + 1).padStart(3, '0')}`,
-      employeeId: newDsr.employeeId,
-      requestType: newDsr.requestType,
-      status: 'PENDING',
-      reason: newDsr.reason || 'Yêu cầu của người lao động',
-      processedBy: '—'
-    };
-    setDsrList((prev) => [item, ...prev]);
-    setNewDsr({ employeeId: '', requestType: 'ACCESS', reason: '' });
-    showToast(`Đã tiếp nhận yêu cầu DSR ${item.id}`);
+    try {
+      const created = await adminApi.submitDsr(
+        {
+          employeeId: newDsr.employeeId.trim(),
+          requestType: newDsr.requestType,
+          reason: newDsr.reason.trim() || 'Yêu cầu của người lao động',
+        },
+        crypto.randomUUID()
+      );
+      setDsrList((prev) => [created, ...prev]);
+      setNewDsr({ employeeId: '', requestType: 'ACCESS', reason: '' });
+      showToast(`Đã tiếp nhận yêu cầu DSR ${created.id}`);
+    } catch (err) {
+      showToast(`Không thể tạo yêu cầu DSR: ${err?.message || 'lỗi hệ thống'}`);
+    }
   };
 
-  const handleProcessDsr = (id, newStatus) => {
-    setDsrList((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, status: newStatus, processedBy: 'admin_system' } : item))
-    );
-    showToast(`Đã cập nhật yêu cầu DSR ${id} sang ${newStatus}`);
+  const handleProcessDsr = async (id, newStatus) => {
+    try {
+      const updated = await adminApi.processDsr(id, newStatus);
+      setDsrList((prev) => prev.map((item) => (item.id === id ? updated : item)));
+      showToast(`Đã cập nhật yêu cầu DSR ${id} sang ${updated.status}`);
+    } catch (err) {
+      showToast(`Không thể cập nhật DSR ${id}: ${err?.message || 'lỗi hệ thống'}`);
+    }
   };
 
   const filteredGates = selectedFactory === 'ALL' ? gates : gates.filter((g) => g.factoryId === selectedFactory);
+  const edgeNodes = devices.filter((d) => d.deviceType === 'EDGE_NODE');
+  const onlineEdgeNodes = edgeNodes.filter((d) => d.status === 'ONLINE').length;
+  const activeGatesCount = gates.filter((g) => g.status === 'ACTIVE').length;
 
   return (
     <section>
-      <p role="status" className="notice">
-        <strong>Dữ liệu mô phỏng:</strong> Các thay đổi trên trang quản trị hiện chỉ lưu trong phiên trình duyệt, chưa nối API backend.
-      </p>
-
       <div className="module-heading">
         <div>
           <span className="module-label">Quản trị hệ thống</span>
           <h1>Nhà máy, Cổng, Ca & Vận hành</h1>
           <p>Quản lý hạ tầng cổng kiểm soát, ca làm việc, cấu hình tích hợp, giám sát thiết bị và chính sách dữ liệu.</p>
         </div>
-        <span className="tmc-badge tmc-badge--warning">Chế độ mô phỏng</span>
+        <span className={`tmc-badge ${loadError ? 'tmc-badge--danger' : 'tmc-badge--success'}`}>
+          {loading ? 'Đang tải…' : loadError ? 'Lỗi kết nối' : canMutate ? 'Đã kết nối API' : 'Chỉ xem (Auditor)'}
+        </span>
       </div>
+
+      {loadError && (
+        <div role="alert" className="notice" style={{ borderColor: 'var(--danger-border)', color: 'var(--danger-ink)' }}>
+          {loadError}
+        </div>
+      )}
 
       {notification && (
         <div className="notice" style={{ background: 'var(--accent-soft)', borderColor: '#b3e3db', color: 'var(--accent-ink)' }}>
@@ -204,9 +214,11 @@ export default function AdministrationPage({ session } = {}) {
                 <option value="FACTORY-LA">Nhà máy Long An (FACTORY-LA)</option>
               </select>
             </div>
-            <button className="tmc-btn-primary" onClick={() => setShowAddGateModal(true)}>
-              + Đăng ký cổng mới
-            </button>
+            {canMutate && (
+              <button className="tmc-btn-primary" onClick={() => setShowAddGateModal(true)}>
+                + Đăng ký cổng mới
+              </button>
+            )}
           </div>
 
           <div className="data-table-scroll">
@@ -378,9 +390,11 @@ export default function AdministrationPage({ session } = {}) {
                 Cấu hình múi giờ nhà máy, cửa sổ chống quét lặp và chính sách lưu trữ.
               </p>
             </div>
-            <button className="tmc-btn-primary" onClick={() => showToast('Đã lưu cấu hình trong phiên mô phỏng.')}>
-              Lưu cấu hình
-            </button>
+            {canMutate && (
+              <button className="tmc-btn-primary" onClick={handleSaveConfigs}>
+                Lưu cấu hình
+              </button>
+            )}
           </div>
           <div style={{ display: 'grid', gap: 10 }}>
             {configs.map((item) => (
@@ -422,11 +436,11 @@ export default function AdministrationPage({ session } = {}) {
             </div>
             <div className="tmc-kpi">
               <div className="tmc-kpi-label">Edge Gate Agents</div>
-              <div className="tmc-kpi-value">2 / 2 Trạm</div>
+              <div className="tmc-kpi-value">{onlineEdgeNodes} / {edgeNodes.length} Trạm</div>
             </div>
             <div className="tmc-kpi">
               <div className="tmc-kpi-label">Cổng Turnstile</div>
-              <div className="tmc-kpi-value">4 / 4 Cổng</div>
+              <div className="tmc-kpi-value">{activeGatesCount} / {gates.length} Cổng</div>
             </div>
             <div className="tmc-kpi">
               <div className="tmc-kpi-label">Hàng đợi đồng bộ</div>

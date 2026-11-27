@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import vn.tmc.central.qrsecurity.api.QrCredentialView;
 import vn.tmc.central.qrsecurity.api.QrIssuer;
+import vn.tmc.central.qrsecurity.api.QrKeySetQuery;
 import vn.tmc.central.qrsecurity.api.QrRevocationQuery;
 import vn.tmc.central.qrsecurity.api.QrSecurityException;
 import vn.tmc.central.qrsecurity.internal.key.QrSigningKeyHandle;
@@ -57,7 +58,7 @@ import vn.tmc.contracts.RevocationChange;
  * Task 5 (rotation scheduler), Task 7 (bootstrap tiêu thụ QrRevocationQuery),
  * Task 8 (wiring + mapping QrSecurityException → ApiError).
  */
-public final class QrCredentialService implements QrIssuer, QrRevocationQuery {
+public final class QrCredentialService implements QrIssuer, QrKeySetQuery, QrRevocationQuery {
 
     /** Permission chuẩn §3 cho lifecycle credential. */
     public static final String PERMISSION_MANAGE_CREDENTIAL = "credential.manage";

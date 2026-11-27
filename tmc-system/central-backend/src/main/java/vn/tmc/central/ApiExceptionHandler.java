@@ -1,6 +1,7 @@
 package vn.tmc.central;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.NoSuchElementException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -15,7 +16,7 @@ import vn.tmc.contracts.ApiError;
 /** PHỤ TRÁCH: Task 8. Lỗi transport chung; DENY/ACK nghiệp vụ vẫn là HTTP 200. */
 @RestControllerAdvice
 public class ApiExceptionHandler {
-    @ExceptionHandler(AccessDeniedException.class)
+    @ExceptionHandler({AccessDeniedException.class, SecurityException.class})
     ResponseEntity<ApiError> forbidden(HttpServletRequest req) {
         return error(req, 403, "FORBIDDEN", "Access is denied.", false);
     }
@@ -35,11 +36,14 @@ public class ApiExceptionHandler {
     ResponseEntity<ApiError> malformed(HttpServletRequest req) {
         return error(req, 400, "MALFORMED_JSON", "Invalid JSON request.", false);
     }
-    @ExceptionHandler({MethodArgumentNotValidException.class, MethodArgumentTypeMismatchException.class})
-    ResponseEntity<ApiError> invalid(HttpServletRequest req) {
-        return error(req, 400, "VALIDATION_ERROR", "Invalid request values.", false);
+    @ExceptionHandler({MethodArgumentNotValidException.class, MethodArgumentTypeMismatchException.class, IllegalArgumentException.class})
+    ResponseEntity<ApiError> invalid(Exception ex, HttpServletRequest req) {
+        String msg = ex instanceof IllegalArgumentException && ex.getMessage() != null && !ex.getMessage().isBlank()
+                ? ex.getMessage()
+                : "Invalid request values.";
+        return error(req, 400, "VALIDATION_ERROR", msg, false);
     }
-    @ExceptionHandler(NoResourceFoundException.class)
+    @ExceptionHandler({NoResourceFoundException.class, NoSuchElementException.class})
     ResponseEntity<ApiError> missing(HttpServletRequest req) {
         return error(req, 404, "NOT_FOUND", "Resource not found.", false);
     }
