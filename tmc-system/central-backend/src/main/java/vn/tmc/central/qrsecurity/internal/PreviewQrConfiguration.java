@@ -26,8 +26,14 @@ public class PreviewQrConfiguration {
   return new QrCredentialService(repo,employees,new FixtureSigningKeyProvider(List.of(key),1),new InMemoryQrRevocationStore(),clock);
  }
  @Bean @org.springframework.core.annotation.Order(20)
- ApplicationRunner seedQr(QrCredentialService qr,Authentication auth,@org.springframework.beans.factory.annotation.Value("${TMC_PREVIEW_PASSWORD}") String password){return args->{
+ ApplicationRunner seedQr(QrCredentialService qr,EmployeeManagement employees,Authentication auth,@org.springframework.beans.factory.annotation.Value("${TMC_PREVIEW_PASSWORD:123456}") String password){return args->{
   var session=auth.authenticate(new Authentication.LoginRequest("preview.admin",password));
-  try{qr.grantCredential(session.actor(),session.actor().employeeId(),"Local preview seed");}finally{auth.logout(session.accessToken());}
+  try{
+   for(var emp:employees.listEmployees(session.actor(),new EmployeeManagement.EmployeeFilter(null,null,null,0,50)).items()){
+    if(emp.active()&&!"AUD-001".equals(emp.employeeCode())){
+     qr.grantCredential(session.actor(),emp.id(),"Local preview seed");
+    }
+   }
+  }finally{auth.logout(session.accessToken());}
  };}
 }
