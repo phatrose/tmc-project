@@ -22,6 +22,7 @@ import java.util.UUID;
  */
 @RestController
 @org.springframework.context.annotation.Profile("!platform")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnBean(AttendanceSync.class)
 @RequestMapping("/api/v1/attendance")
 public final class AttendanceSyncController {
     private final AttendanceSync service;

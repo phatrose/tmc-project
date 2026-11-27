@@ -48,6 +48,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @RestController
 @org.springframework.context.annotation.Profile("!platform")
+@org.springframework.boot.autoconfigure.condition.ConditionalOnBean(AttendanceQueries.class)
 @RequestMapping("/api/v1/attendance")
 public final class AttendanceController {
 
