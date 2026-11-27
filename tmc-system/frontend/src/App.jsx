@@ -7,6 +7,7 @@ import AttendancePage from './pages/AttendancePage.jsx';
 import ReportsPage from './pages/ReportsPage.jsx';
 import AdministrationPage from './pages/AdministrationPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
+import DashboardView from './pages/DashboardView.jsx';
 import { routes, canAccess, routeFromHash } from './navigation.js';
 import { getSession, subscribeSession, getAccessToken } from './session.js';
 import { logout, request } from './api.js';
@@ -202,45 +203,11 @@ export default function App() {
               <a className="primary-link" href="#/home">Về tổng quan</a>
             </section>
           ) : route.id === 'home' ? (
-            <section>
-              <div className="welcome-panel">
-                <div>
-                  <h2>Hệ thống chấm công &amp; kiểm soát ra vào TMC</h2>
-                  <p>
-                    Quản lý nhân sự, cấp phát mã QR động ES256 60 giây, quét camera tự động tại cổng và tổng hợp báo cáo — kiểm toán minh bạch.
-                  </p>
-                </div>
-                <div className="welcome-actions">
-                  <a className="primary-link" href={session ? '#/qr' : '#/login'}>
-                    {session ? 'Mở QR cá nhân →' : 'Đăng nhập để bắt đầu →'}
-                  </a>
-                  {session && canAccess(routes.find((r) => r.id === 'kiosk'), session) && (
-                    <a className="secondary-link" href="#/kiosk">
-                      Mở cổng quét QR
-                    </a>
-                  )}
-                </div>
-              </div>
-
-              <div className="module-grid">
-                {routes
-                  .filter((r) => r.task && r.id !== 'login' && canAccess(r, session))
-                  .map((item) => {
-                    const meta = MODULE_META[item.id] || { kind: 'live', badge: 'Chức năng', desc: '' };
-                    return (
-                      <a className="module-card" key={item.id} href={`#/${item.id}`}>
-                        <div className="module-card-top">
-                          <span className="module-card-icon"><NavIcon id={item.id} /></span>
-                          <span className={`module-pill module-pill--${meta.kind}`}>{meta.badge}</span>
-                        </div>
-                        <h2>{item.title}</h2>
-                        <p>{meta.desc}</p>
-                        <span className="module-cta">Mở chức năng →</span>
-                      </a>
-                    );
-                  })}
-              </div>
-            </section>
+            <DashboardView
+              session={session}
+              moduleMeta={MODULE_META}
+              renderIcon={(id) => <NavIcon id={id} />}
+            />
           ) : !canAccess(route, session) ? (
             <section className="state-card">
               <h2>{route.title}</h2>
