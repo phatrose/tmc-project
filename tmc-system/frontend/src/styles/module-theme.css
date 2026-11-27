@@ -1,24 +1,24 @@
 /* PHỤ TRÁCH: Task 8. Ngôn ngữ giao diện dùng chung cho toàn bộ trang nghiệp vụ. */
 .workspace-page { max-width: 1320px; margin: 0 auto; }
-.workspace-page h1 { font-size: 1.5rem; letter-spacing: -0.02em; color: var(--ink); }
-.workspace-page h2 { font-size: 1.125rem; color: var(--ink); }
-.workspace-page h3 { font-size: 0.9375rem; color: var(--ink); }
+.workspace-page h1 { font-size: 32px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink); }
+.workspace-page h2 { font-size: 22px; font-weight: 500; color: var(--ink); }
+.workspace-page h3 { font-size: 20px; font-weight: 500; color: var(--ink); }
 
 .module-label { display: none; }
 .module-heading {
-  padding: 18px 22px;
+  padding: 20px 24px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  margin-bottom: 18px;
+  margin-bottom: 20px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
 }
-.module-heading h1 { margin: 0 0 4px; }
-.module-heading p { margin: 0; font-size: 13.5px; color: var(--muted); }
+.module-heading h1 { margin: 0 0 6px; }
+.module-heading p { margin: 0; font-size: 16px; color: var(--muted); }
 
 /* ── Shared Cards, Toolbars, KPI, Badges, Tables ───────────────────────────── */
 .tmc-card {
@@ -91,15 +91,13 @@
   box-shadow: var(--shadow-sm);
 }
 .tmc-kpi-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--muted);
 }
 .tmc-kpi-value {
   font-size: 24px;
-  font-weight: 800;
+  font-weight: 600;
   margin-top: 6px;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
@@ -113,10 +111,10 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 10px;
+  padding: 4px 10px;
   border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   white-space: nowrap;
 }
 .tmc-badge--success { background: var(--success-bg); color: var(--success-ink); }
@@ -139,10 +137,10 @@
   border: 0;
   background: transparent;
   color: var(--ink-soft);
-  padding: 7px 14px;
+  padding: 8px 15px;
   border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
 }
 .tmc-tabs button[aria-selected="true"],
 .tmc-tabs button[aria-pressed="true"] {
@@ -151,21 +149,19 @@
   border: 1px solid var(--border);
 }
 
-.workspace-page table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: 13.5px; }
+.workspace-page table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: 15px; }
 .workspace-page th {
   background: var(--surface-soft);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 11px 14px;
+  color: var(--ink-soft);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 13px 16px;
   text-align: left;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 .workspace-page td {
-  padding: 11px 14px;
+  padding: 13px 16px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
@@ -205,7 +201,7 @@
 }
 .tmc-form-grid { display: grid; gap: 12px; margin-top: 14px; }
 .tmc-field { display: grid; gap: 5px; }
-.tmc-field label { font-size: 13px; font-weight: 600; color: var(--ink-soft); }
+.tmc-field label { font-size: 14px; font-weight: 500; color: var(--ink-soft); }
 .tmc-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
 .tmc-detail-grid {
@@ -218,10 +214,10 @@
   background: var(--surface-soft);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 12px 14px;
 }
-.tmc-detail-item span { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
-.tmc-detail-item strong { font-size: 13.5px; word-break: break-all; }
+.tmc-detail-item span { display: block; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+.tmc-detail-item strong { font-size: 15px; word-break: break-all; }
 
 .emp-cell { display: flex; align-items: center; gap: 10px; }
 .emp-avatar {
@@ -273,7 +269,7 @@
   background: var(--accent);
   transition: width 0.5s linear;
 }
-.qr-meta { font-size: 13.5px; color: var(--ink-soft); margin: 0 0 18px; font-variant-numeric: tabular-nums; }
+.qr-meta { font-size: 15px; color: var(--ink-soft); margin: 0 0 18px; font-variant-numeric: tabular-nums; }
 
 /* ── Gate Station (Kiosk & Guard) ──────────────────────────────────────────── */
 .workspace-page .gs-panel {
@@ -304,15 +300,18 @@
 .workspace-page .t4-tabs button { border: 0; background: transparent; color: var(--ink-soft); padding: 9px 18px; border-radius: 9px; }
 .workspace-page .t4-tabs [aria-selected="true"] { background: var(--surface); color: var(--accent); box-shadow: 0 2px 6px rgba(15, 37, 42, 0.1); }
 .workspace-page .t4-filters { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px; gap: 14px; }
-.workspace-page .t4-filters label { font-size: 12px; font-weight: 600; color: var(--ink-soft); gap: 6px; }
+.workspace-page .t4-filters label { font-size: 14px; font-weight: 500; color: var(--ink-soft); gap: 6px; }
 .workspace-page .t4-filters button[type="submit"] { background: var(--accent); color: #ffffff; border: 0; padding: 10px 18px; }
 .workspace-page .t4-summary { background: var(--surface-tint); border: 1px solid #c9e1d8; border-radius: var(--radius-md); padding: 18px; }
 .workspace-page .t4-summary > span { background: var(--surface); border-radius: 9px; padding: 10px 16px; font-weight: 600; }
-.workspace-page .t4-pager { justify-content: flex-end; font-size: 13px; color: var(--muted); margin-top: 16px; }
+.workspace-page .t4-pager { justify-content: flex-end; font-size: 14px; color: var(--muted); margin-top: 16px; }
 .workspace-page .t4-error, .workspace-page .t4-notice { border-radius: 10px; padding: 14px 16px; }
 .workspace-page .t4-jobs article { border-color: var(--border); border-radius: 12px; background: var(--surface); }
 
 @media (max-width: 800px) {
+  .workspace-page h1 { font-size: 24px; }
+  .workspace-page h2 { font-size: 19px; }
+  .workspace-page h3 { font-size: 18px; }
   .workspace-page th, .workspace-page td { padding: 10px 12px; }
   .module-heading { padding: 18px; }
   .personal-qr-card { padding: 24px 18px; }
