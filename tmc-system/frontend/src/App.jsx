@@ -107,6 +107,7 @@ export default function App() {
   }, [route]);
 
   const ActivePage = route && components[route.id];
+  const showStandaloneLogin = !session && route?.id !== 'kiosk';
 
   async function signOut() {
     setLoggingOut(true);
@@ -119,6 +120,20 @@ export default function App() {
     } finally {
       setLoggingOut(false);
     }
+  }
+
+  if (showStandaloneLogin) {
+    return (
+      <main id="content" className="login-standalone" tabIndex={-1}>
+        <AppErrorBoundary key="login:guest">
+          <LoginPage
+            onLoginSuccess={() => {
+              window.location.hash = '/home';
+            }}
+          />
+        </AppErrorBoundary>
+      </main>
+    );
   }
 
   return (
