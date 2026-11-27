@@ -51,9 +51,9 @@ export default function LoginPage({ onLoginSuccess }) {
             <span className="login-mark">TMC</span>
             <span className="login-brand-name">TMC Access Control</span>
           </div>
-          <h1>Hệ thống kiểm soát ra vào &amp; chấm công bằng QR</h1>
+          <h1>Kiểm soát ra vào &amp; chấm công bằng QR</h1>
           <p>
-            Xác thực qua cổng turnstile bằng mã QR động ES256, ghi nhận sự kiện chấm công bất biến và quản lý nhân sự tập trung.
+            Xác thực qua cổng turnstile bằng mã QR động ES256 và tổng hợp chấm công tập trung.
           </p>
         </div>
 
@@ -64,18 +64,12 @@ export default function LoginPage({ onLoginSuccess }) {
             width="960"
             height="540"
           />
-          <figcaption>Cổng kiểm soát turnstile tích hợp đầu đọc QR động tại trạm ra vào</figcaption>
         </figure>
-
-        <div className="login-detail">
-          Bảo mật phiên trong bộ nhớ · Mã QR động 60 giây · Nhật ký kiểm toán bất biến
-        </div>
       </div>
 
       <div className="login-form-area">
         <div className="login-form-panel">
           <h2>Đăng nhập</h2>
-          <p>Sử dụng tài khoản nội bộ được quản trị viên cấp.</p>
 
           {error && <div className="notice error" role="alert" style={{ marginTop: 16 }}>{error}</div>}
 
@@ -126,7 +120,7 @@ export default function LoginPage({ onLoginSuccess }) {
           </form>
 
           <p className="login-note">
-            Phiên làm việc có thời hạn cố định 15 phút kể từ lúc đăng nhập và chỉ lưu trong bộ nhớ trình duyệt. Tải lại trang sẽ yêu cầu đăng nhập lại.
+            Phiên đăng nhập có hiệu lực 15 phút và chỉ lưu trong bộ nhớ trình duyệt; tải lại trang sẽ yêu cầu đăng nhập lại.
           </p>
         </div>
       </div>
