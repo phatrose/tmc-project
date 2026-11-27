@@ -121,7 +121,7 @@ export default function App() {
         <p className="nav-caption">Không gian làm việc</p>
         <nav aria-label="Các chức năng">
           {routes
-            .filter((item) => item.id !== 'login' || !session)
+            .filter((item) => (item.id !== 'login' || !session) && canAccess(item, session))
             .map((item) => (
               <a
                 key={item.id}
@@ -129,9 +129,6 @@ export default function App() {
                 aria-current={route?.id === item.id ? 'page' : undefined}
               >
                 <span>{item.title}</span>
-                {!canAccess(item, session) && (
-                  <span className="locked" aria-label="Cần quyền truy cập">Khóa</span>
-                )}
               </a>
             ))}
         </nav>
@@ -211,7 +208,7 @@ export default function App() {
 
             <div className="module-grid">
               {routes
-                .filter((r) => r.task && r.id !== 'login')
+                .filter((r) => r.task && r.id !== 'login' && canAccess(r, session))
                 .map((item) => {
                   const meta = MODULE_META[item.id] || { kind: 'live', badge: 'Chức năng', desc: '' };
                   return (
