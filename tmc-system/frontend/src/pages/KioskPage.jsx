@@ -5,7 +5,7 @@ import '../styles/gate-station.css';
 
 /**
  * PHỤ TRÁCH: Task 2. Màn hình quét tại cổng (FR-GS-03; UC-02/03; CONTRACT-V1.md §5).
- * - Đầu đọc QR hoạt động như bàn phím: gõ token rồi Enter vào ô nhập được focus sẵn, hoặc bấm nút Quét.
+ * - Hỗ trợ 3 cách quét: đầu đọc QR USB (gõ + Enter), bật Camera webcam (BarcodeDetector), và nút quét thử nhanh.
  * - Trong môi trường preview, gọi POST /api/v1/preview/scans để xác minh QR và ghi nhận sự kiện chấm công thật.
  */
 const DEFAULT_GATE_ID = import.meta.env?.VITE_KIOSK_GATE_ID || '00000000-0000-4000-8000-000000000011';
@@ -18,16 +18,82 @@ export default function KioskPage({ session } = {}) {
   const [view, setView] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(null);
   const [history, setHistory] = useState([]);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [cameraError, setCameraError] = useState('');
   const pending = useRef(null);
   const input = useRef(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const lastScannedRef = useRef({ token: '', at: 0 });
   const gateValid = isUuid(gateId);
 
-  useEffect(() => { if (phase === 'idle') input.current?.focus(); }, [phase]);
+  useEffect(() => { if (phase === 'idle' && !cameraOn) input.current?.focus(); }, [phase, cameraOn]);
   useEffect(() => {
     if (phase !== 'result') return undefined;
     const timer = setTimeout(() => { setPhase('idle'); setView(null); }, RESULT_RESET_MS);
     return () => clearTimeout(timer);
   }, [phase]);
+
+  function stopCamera() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraOn(false);
+  }
+
+  useEffect(() => () => stopCamera(), []);
+
+  async function startCamera() {
+    setCameraError('');
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('Trình duyệt không hỗ trợ truy cập camera (cần HTTPS hoặc localhost).');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCameraOn(true);
+    } catch (err) {
+      setCameraError(`Không thể mở camera: ${err?.message || 'bị từ chối quyền hoặc không có webcam'}.`);
+    }
+  }
+
+  useEffect(() => {
+    if (!cameraOn || !streamRef.current || !videoRef.current) return undefined;
+    const video = videoRef.current;
+    video.srcObject = streamRef.current;
+    video.play().catch(() => {});
+
+    if (typeof window.BarcodeDetector !== 'function') {
+      setCameraError('Camera đã bật, nhưng trình duyệt này chưa hỗ trợ BarcodeDetector tự động đọc QR (hãy dùng Chrome/Edge hoặc dán mã QR vào ô bên dưới).');
+      return undefined;
+    }
+
+    const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+    const interval = setInterval(async () => {
+      if (!videoRef.current || videoRef.current.readyState < 2 || phase === 'sending' || !gateValid) return;
+      try {
+        const codes = await detector.detect(videoRef.current);
+        const raw = codes?.[0]?.rawValue?.trim();
+        if (!raw) return;
+        const now = Date.now();
+        if (lastScannedRef.current.token === raw && now - lastScannedRef.current.at < 3000) return;
+        lastScannedRef.current = { token: raw, at: now };
+        send({ scanId: newScanId(), token: raw, gateId });
+      } catch {
+        // Bỏ qua lỗi frame đơn lẻ
+      }
+    }, 300);
+
+    return () => clearInterval(interval);
+  }, [cameraOn, phase, gateValid, gateId]);
 
   async function send(attempt) {
     setPhase('sending');
@@ -93,7 +159,7 @@ export default function KioskPage({ session } = {}) {
     <div className="module-heading">
       <span className="module-label">TRẠM CHẤM CÔNG</span>
       <h1 id="kiosk-title">Quét tại cổng</h1>
-      <p>Đưa mã QR vào đầu đọc hoặc bấm nút quét thử bên dưới để ghi nhận phiên chấm công.</p>
+      <p>Bật camera để mô phỏng cổng quét QR, dùng đầu đọc USB hoặc bấm nút quét thử nhanh.</p>
     </div>
 
     <div className="gs-panel">
@@ -105,20 +171,44 @@ export default function KioskPage({ session } = {}) {
       </div>
     </div>
 
+    <div className="gs-panel">
+      <div className="gs-row">
+        {!cameraOn ? (
+          <button type="button" onClick={startCamera} disabled={!gateValid}>
+            Bật camera quét QR
+          </button>
+        ) : (
+          <button type="button" onClick={stopCamera}>
+            Tắt camera
+          </button>
+        )}
+        {session && (
+          <button type="button" onClick={scanMyQrNow} disabled={!gateValid || phase === 'sending'}>
+            Lấy &amp; quét QR của tôi ngay
+          </button>
+        )}
+      </div>
+      {cameraError && <p className="gs-hint" role="alert">{cameraError}</p>}
+      {cameraOn && (
+        <div style={{ marginTop: 12, position: 'relative', maxWidth: 420, borderRadius: 12, overflow: 'hidden', border: '2px solid #0f766e', background: '#000' }}>
+          <video ref={videoRef} playsInline muted style={{ width: '100%', display: 'block' }} />
+          <div style={{
+            position: 'absolute', inset: '18%', border: '2px dashed rgba(255,255,255,0.85)',
+            borderRadius: 10, pointerEvents: 'none',
+          }} />
+        </div>
+      )}
+    </div>
+
     <form onSubmit={onSubmit} className="gs-panel">
       <div className="gs-field">
-        <label htmlFor="qr-input">Đưa mã QR vào đầu đọc</label>
+        <label htmlFor="qr-input">Hoặc đưa mã QR vào đầu đọc USB / dán mã thủ công</label>
         <input id="qr-input" ref={input} type="password" autoComplete="off" spellCheck="false"
           disabled={!gateValid || phase === 'sending'} aria-describedby="qr-hint" />
         <p id="qr-hint" className="gs-hint">Đầu đọc sẽ tự nhập mã và nhấn Enter, hoặc dán mã QR rồi bấm Quét.</p>
       </div>
       <div className="gs-row">
         <button type="submit" disabled={!gateValid || phase === 'sending'}>Quét mã QR</button>
-        {session && (
-          <button type="button" onClick={scanMyQrNow} disabled={!gateValid || phase === 'sending'}>
-            Lấy &amp; quét QR của tôi ngay
-          </button>
-        )}
       </div>
     </form>
 
