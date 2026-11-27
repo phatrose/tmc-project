@@ -17,6 +17,9 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import vn.tmc.central.usermgmt.api.TokenIssuerPort;
 
 /** PHỤ TRÁCH: Task 8. Nền tảng HTTP; Task 1 cung cấp chain xác thực thật thay fallback. */
 @Configuration(proxyBeanMethods = false)
@@ -34,6 +37,18 @@ public class PlatformConfiguration {
     @ConditionalOnMissingBean(UserDetailsService.class)
     UserDetailsService noDefaultUsers() {
         return username -> { throw new UsernameNotFoundException("Authentication not configured"); };
+    }
+    @Bean
+    @ConditionalOnMissingBean(PasswordEncoder.class)
+    PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+    @Bean
+    @ConditionalOnMissingBean(TokenIssuerPort.class)
+    TokenIssuerPort fallbackActionGrantIssuer() {
+        return (id, role, scopes) -> {
+            throw new ApiException(503, "DEPENDENCY_UNAVAILABLE", "Action-grant signer is not integrated.", true);
+        };
     }
     @Bean
     @org.springframework.context.annotation.Profile("!integration-preview")
