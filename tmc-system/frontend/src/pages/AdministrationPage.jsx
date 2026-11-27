@@ -1,13 +1,41 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { request } from '../api.js';
+import { createAdminApi } from './adminApi.js';
+
+const adminApi = createAdminApi(request);
 
 /**
  * PHỤ TRÁCH: Task 5.
  * VAI TRÒ: View Quản trị hệ thống (Nhà máy, Cổng, Ca làm việc, Cấu hình, Giám sát, DSR và Lưu trữ).
  */
-export default function AdministrationPage() {
+export default function AdministrationPage({ session } = {}) {
   const [activeTab, setActiveTab] = useState('gates');
   const [selectedFactory, setSelectedFactory] = useState('ALL');
   const [notification, setNotification] = useState(null);
+
+  useEffect(() => {
+    if (!session) return undefined;
+    const controller = new AbortController();
+    Promise.all([
+      adminApi.listGates({ signal: controller.signal }),
+      adminApi.listConfigurations({ signal: controller.signal }),
+      adminApi.listDsr({ signal: controller.signal }),
+    ])
+      .then(([liveGates, liveConfigs, liveDsr]) => {
+        if (Array.isArray(liveGates) && liveGates.length > 0) setGates(liveGates);
+        if (Array.isArray(liveConfigs) && liveConfigs.length > 0) {
+          setConfigs(liveConfigs.map((c) => ({
+            key: c.key,
+            value: c.value,
+            category: c.category || 'SYSTEM',
+            desc: c.description || c.desc || '',
+          })));
+        }
+        if (Array.isArray(liveDsr) && liveDsr.length > 0) setDsrList(liveDsr);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [session]);
 
   const [gates, setGates] = useState([
     { id: 'GATE-BD-01', factoryId: 'FACTORY-BD', edgeId: 'EDGE-BD-01', name: 'Cổng chính 1 - Vào', direction: 'IN', turnstileApiId: 'TURNSTILE-BD-01-IN', status: 'ACTIVE' },
