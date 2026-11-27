@@ -37,8 +37,8 @@ async function fetchQrToken(accessToken) {
   }
   const body = await response.json();
   if (typeof body?.token !== 'string' || typeof body?.expiresAt !== 'string') {
-    const error = new Error('Response /me/qr-token sai contract');
-    error.apiError = { code: 'INTERNAL_ERROR', message: 'Response sai contract', requestId, retryable: false };
+    const error = new Error('Phản hồi cấp mã QR không đúng định dạng.');
+    error.apiError = { code: 'INTERNAL_ERROR', message: 'Phản hồi sai định dạng', requestId, retryable: false };
     throw error;
   }
   return { token: body.token, expiresAt: new Date(body.expiresAt) };
@@ -52,7 +52,7 @@ function QrCanvas({ token }) {
       return null;
     }
   }, [token]);
-  if (!qr) return <p role="alert">Không tạo được ảnh QR từ token.</p>;
+  if (!qr) return <p role="alert">Không tạo được hình mã QR từ dữ liệu nhận về.</p>;
   const quiet = 4;
   const paths = [];
   for (let r = 0; r < qr.size; r++) {
@@ -115,6 +115,7 @@ export default function QrPage({ session }) {
   }, [accessToken, load]);
 
   const secondsLeft = state.expiresAt ? Math.max(0, Math.round((state.expiresAt.getTime() - now) / 1000)) : 0;
+  const isExpired = state.status === 'ready' && Boolean(state.expiresAt) && secondsLeft === 0;
   const progressPct = Math.min(100, Math.max(0, (secondsLeft / TTL_SECONDS) * 100));
 
   useEffect(() => {
@@ -125,9 +126,9 @@ export default function QrPage({ session }) {
   if (!accessToken) {
     return (
       <section className="personal-qr-card">
-        <span className="module-label">Thẻ chấm công điện tử</span>
         <h1>QR cá nhân</h1>
-        <p className="status">Cần đăng nhập để hiển thị QR động. QR không gửi qua email/SMS.</p>
+        <p className="status">Bạn cần đăng nhập để nhận mã QR động. Hệ thống không gửi QR qua email hoặc SMS.</p>
+        <a className="primary-link" href="#/login" style={{ marginTop: 14 }}>Đến trang đăng nhập</a>
       </section>
     );
   }
@@ -135,33 +136,60 @@ export default function QrPage({ session }) {
   const expiresAtText = state.expiresAt
     ? state.expiresAt.toLocaleTimeString('vi-VN', { hour12: false })
     : '';
-  let notice = null;
+
+  let errorDetail = null;
+  let needsRelogin = false;
   if (state.error) {
     const code = state.error.apiError?.code;
     if (state.error.httpStatus === 401 || code === 'SESSION_EXPIRED' || code === 'UNAUTHENTICATED') {
-      notice = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+      needsRelogin = true;
+      errorDetail = {
+        title: 'Phiên đăng nhập đã hết hạn',
+        guide: 'Vui lòng đăng nhập lại để hệ thống cấp mã QR động mới.',
+      };
     } else if (state.error.httpStatus === 409 || code === 'INVALID_STATE') {
-      notice = 'Tài khoản chưa có credential QR ACTIVE. Vui lòng liên hệ HR để được cấp credential.';
+      errorDetail = {
+        title: 'Tài khoản chưa được cấp quyền QR đang hoạt động',
+        guide: 'Liên hệ phòng Nhân sự (HR) để kích hoạt thông tin QR cho tài khoản của bạn, sau đó bấm Thử lại.',
+      };
     } else if (code === 'RATE_LIMITED' || state.error.apiError?.retryable) {
-      notice = 'Hệ thống bận, đang thử lại. (Mã lỗi: ' + (code ?? '—') + ')';
+      errorDetail = {
+        title: 'Hệ thống đang bận hoặc kết nối tạm gián đoạn',
+        guide: `Chờ vài giây rồi bấm "Thử lại" để lấy mã QR mới. (Mã lỗi: ${code ?? 'NETWORK'})`,
+      };
     } else {
-      notice = 'Không lấy được QR. (Mã lỗi: ' + (code ?? '—') + ' · requestId: ' + (state.error.apiError?.requestId ?? '—') + ')';
+      errorDetail = {
+        title: 'Không thể lấy mã QR lúc này',
+        guide: `Vui lòng bấm "Thử lại" hoặc báo quản trị viên kèm mã tra cứu: ${state.error.apiError?.requestId ?? '—'}.`,
+      };
     }
   }
 
+  const badge = (() => {
+    if (state.status === 'error') return { cls: 'tmc-badge--danger', text: 'Lấy mã thất bại' };
+    if (isExpired) return { cls: 'tmc-badge--warning', text: 'Mã đã hết hạn' };
+    if (state.status === 'ready') return { cls: 'tmc-badge--success', text: 'Đang hoạt động' };
+    if (state.status === 'refreshing') return { cls: 'tmc-badge--warning', text: 'Đang cấp mã mới…' };
+    return { cls: 'tmc-badge--neutral', text: 'Đang tải mã…' };
+  })();
+
   return (
     <section className="personal-qr-card">
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
-        <span className="tmc-badge tmc-badge--accent">ES256 Dynamic QR</span>
-        <span className={`tmc-badge ${state.status === 'ready' ? 'tmc-badge--success' : 'tmc-badge--warning'}`}>
-          {state.status === 'ready' ? 'Đang hoạt động' : state.status === 'refreshing' ? 'Đang làm mới…' : 'Đang tải…'}
-        </span>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 10 }}>
+        <span className="tmc-badge tmc-badge--accent">QR động ES256</span>
+        <span className={`tmc-badge ${badge.cls}`}>{badge.text}</span>
       </div>
 
       <h1>QR cá nhân</h1>
-      <p>Mã QR động có hiệu lực 60 giây, chỉ dùng một lần tại cổng. Không chia sẻ ảnh chụp màn hình.</p>
+      <p>Mã QR có hiệu lực 60 giây, chỉ dùng một lần tại cổng và tự làm mới trước khi hết hạn. Không chia sẻ ảnh chụp màn hình.</p>
 
-      {state.token && (state.status === 'ready' || state.status === 'refreshing') && (
+      {state.status === 'loading' && (
+        <div className="ops-empty" aria-busy="true">
+          <p>Đang kết nối máy chủ để cấp mã QR động…</p>
+        </div>
+      )}
+
+      {state.token && (state.status === 'ready' || state.status === 'refreshing') && !isExpired && (
         <>
           <div className="qr-frame">
             <QrCanvas token={state.token} />
@@ -171,22 +199,39 @@ export default function QrPage({ session }) {
           </div>
           <p className="qr-meta">
             Hết hạn lúc <strong>{expiresAtText}</strong>{' '}
-            {state.status === 'refreshing' ? '— đang cấp lại…' : `— còn ${secondsLeft} giây`}
+            {state.status === 'refreshing' ? '— đang tự động cấp mã mới…' : `— còn ${secondsLeft} giây`}
           </p>
         </>
       )}
 
-      {state.status === 'loading' && <p className="status" style={{ margin: '28px 0' }}>Đang lấy mã QR…</p>}
-      {notice && <div role="alert" className="notice error" style={{ marginTop: 18 }}>{notice}</div>}
+      {isExpired && (
+        <div role="status" className="notice" style={{ marginTop: 18, textAlign: 'left' }}>
+          <strong>Mã QR đã hết hiệu lực</strong>
+          <p>Bấm “Cấp lại QR ngay” bên dưới để tạo mã mới trước khi đưa vào đầu đọc tại cổng.</p>
+        </div>
+      )}
 
-      <button
-        type="button"
-        className="tmc-btn-primary"
-        onClick={load}
-        disabled={state.status === 'loading' || state.status === 'refreshing'}
-      >
-        Cấp lại QR ngay
-      </button>
+      {errorDetail && (
+        <div role="alert" className="notice error" style={{ marginTop: 18, textAlign: 'left' }}>
+          <strong>{errorDetail.title}</strong>
+          <p>{errorDetail.guide}</p>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+        {needsRelogin ? (
+          <a className="primary-link" href="#/login">Đăng nhập lại</a>
+        ) : (
+          <button
+            type="button"
+            className="tmc-btn-primary"
+            onClick={load}
+            disabled={state.status === 'loading' || state.status === 'refreshing'}
+          >
+            {state.status === 'error' ? 'Thử lại' : 'Cấp lại QR ngay'}
+          </button>
+        )}
+      </div>
     </section>
   );
 }

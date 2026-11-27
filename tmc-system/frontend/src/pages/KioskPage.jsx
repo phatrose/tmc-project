@@ -5,20 +5,50 @@ import '../styles/gate-station.css';
 
 /**
  * PHỤ TRÁCH: Task 2. Màn hình Kiosk quét tự động tại cổng (FR-GS-03; UC-02/03; CONTRACT-V1.md §5).
- * - Tự động bật camera ngay khi mở trang, không cần thao tác thủ công.
- * - Nhân viên chỉ cần đưa mã QR vào khung ngắm: tự nhận diện, xác minh và ghi nhận phiên chấm công.
+ * - Tự động khởi động camera ngay khi mở trang.
+ * - Phân biệt rõ: đang khởi động, bị từ chối quyền camera, không có/lỗi thiết bị, sẵn sàng quét, thành công và thất bại.
  */
 const DEFAULT_GATE_ID = import.meta.env?.VITE_KIOSK_GATE_ID || '00000000-0000-4000-8000-000000000011';
 const RESULT_RESET_MS = 4000;
 const SCAN_TIMEOUT_MS = 5000;
+
+function describeCameraError(err) {
+  const name = err?.name || '';
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+    return {
+      kind: 'denied',
+      title: 'Bị từ chối quyền truy cập camera',
+      detail: 'Trình duyệt đang chặn quyền dùng camera. Hãy bấm biểu tượng ổ khóa trên thanh địa chỉ, cho phép quyền Camera rồi bấm "Thử bật lại camera".',
+    };
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+    return {
+      kind: 'device',
+      title: 'Không tìm thấy thiết bị camera',
+      detail: 'Không phát hiện webcam hoặc đầu đọc hình ảnh trên máy này. Kiểm tra lại kết nối thiết bị rồi bấm "Thử bật lại camera".',
+    };
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
+    return {
+      kind: 'device',
+      title: 'Camera đang bận hoặc gặp lỗi thiết bị',
+      detail: 'Camera có thể đang được ứng dụng khác sử dụng. Hãy đóng ứng dụng đang dùng camera rồi thử lại.',
+    };
+  }
+  return {
+    kind: 'device',
+    title: 'Không thể khởi động camera',
+    detail: 'Thiết bị chưa sẵn sàng hoặc trình duyệt không hỗ trợ truy cập camera trên địa chỉ hiện tại.',
+  };
+}
 
 export default function KioskPage() {
   const [phase, setPhase] = useState('idle'); // idle | sending | result | error
   const [view, setView] = useState(null);
   const [elapsedMs, setElapsedMs] = useState(null);
   const [history, setHistory] = useState([]);
-  const [cameraOn, setCameraOn] = useState(false);
-  const [cameraError, setCameraError] = useState('');
+  const [cameraState, setCameraState] = useState('starting'); // starting | ready | denied | device | unsupported
+  const [cameraNotice, setCameraNotice] = useState(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const lastScannedRef = useRef({ token: '', at: 0 });
@@ -40,13 +70,18 @@ export default function KioskPage() {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    setCameraOn(false);
   }
 
   async function startCamera() {
-    setCameraError('');
+    stopCamera();
+    setCameraState('starting');
+    setCameraNotice(null);
     if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraError('Trình duyệt không hỗ trợ camera (cần HTTPS hoặc localhost).');
+      setCameraState('unsupported');
+      setCameraNotice({
+        title: 'Trình duyệt chưa hỗ trợ truy cập camera',
+        detail: 'Cần mở trang qua HTTPS hoặc localhost trên trình duyệt hiện đại (Chrome, Edge) để dùng camera quét QR.',
+      });
       return;
     }
     try {
@@ -55,13 +90,14 @@ export default function KioskPage() {
         audio: false,
       });
       streamRef.current = stream;
-      setCameraOn(true);
+      setCameraState('ready');
     } catch (err) {
-      setCameraError(`Không thể tự động mở camera: ${err?.message || 'chưa cấp quyền webcam'}.`);
+      const info = describeCameraError(err);
+      setCameraState(info.kind);
+      setCameraNotice({ title: info.title, detail: info.detail });
     }
   }
 
-  // Tự động bật camera ngay khi mở trang Kiosk
   useEffect(() => {
     startCamera();
     return () => stopCamera();
@@ -84,7 +120,7 @@ export default function KioskPage() {
       setHistory((prev) => [
         {
           id: result.eventId || attempt.scanId,
-          time: new Date().toLocaleTimeString('vi-VN'),
+          time: new Date().toLocaleTimeString('vi-VN', { hour12: false }),
           decision: result.decision,
           direction: result.direction || '—',
           detail: described.title,
@@ -101,15 +137,17 @@ export default function KioskPage() {
     }
   }
 
-  // Tự động quét QR liên tục từ camera
   useEffect(() => {
-    if (!cameraOn || !streamRef.current || !videoRef.current) return undefined;
+    if (cameraState !== 'ready' || !streamRef.current || !videoRef.current) return undefined;
     const video = videoRef.current;
     video.srcObject = streamRef.current;
     video.play().catch(() => {});
 
     if (typeof window.BarcodeDetector !== 'function') {
-      setCameraError('Trình duyệt này chưa hỗ trợ tự động đọc QR (BarcodeDetector). Hãy mở bằng Chrome hoặc Edge.');
+      setCameraNotice({
+        title: 'Trình duyệt chưa hỗ trợ tự động đọc mã QR',
+        detail: 'Camera đã bật nhưng trình duyệt hiện tại không có bộ giải mã BarcodeDetector. Hãy mở bằng Chrome hoặc Edge phiên bản mới.',
+      });
       return undefined;
     }
 
@@ -125,74 +163,104 @@ export default function KioskPage() {
         lastScannedRef.current = { token: raw, at: now };
         send({ scanId: newScanId(), token: raw, gateId: DEFAULT_GATE_ID });
       } catch {
-        // Bỏ qua lỗi frame đơn lẻ
+        // Bỏ qua lỗi đọc khung hình đơn lẻ
       }
     }, 250);
 
     return () => clearInterval(interval);
-  }, [cameraOn]);
+  }, [cameraState]);
 
   const tone = view?.tone || 'idle';
-  return <section aria-labelledby="kiosk-title">
-    <div className="module-heading">
-      <div>
-        <h1 id="kiosk-title">Quét tại cổng</h1>
-        <p>Đưa mã QR vào trước camera — cổng sẽ tự động xác minh và mở khóa.</p>
-      </div>
-    </div>
+  const cameraBadge = (() => {
+    if (cameraState === 'ready') return { cls: 'tmc-badge--success', text: 'Camera sẵn sàng' };
+    if (cameraState === 'starting') return { cls: 'tmc-badge--warning', text: 'Đang khởi động camera…' };
+    if (cameraState === 'denied') return { cls: 'tmc-badge--danger', text: 'Chưa cấp quyền camera' };
+    return { cls: 'tmc-badge--danger', text: 'Lỗi thiết bị camera' };
+  })();
 
-    <div className="gs-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-      {cameraOn ? (
-        <div className="gs-camera-stage">
-          <video ref={videoRef} playsInline muted />
-          <div className="gs-camera-reticle" />
+  return (
+    <section aria-labelledby="kiosk-title">
+      <div className="module-heading">
+        <div>
+          <h1 id="kiosk-title">Quét tại cổng</h1>
+          <p>Đưa mã QR động vào khung ngắm camera để xác minh và ghi nhận lượt vào/ra.</p>
         </div>
-      ) : (
-        <div style={{ textAlign: 'center', padding: '16px 0' }}>
-          <p className="gs-hint" role="alert">{cameraError || 'Đang khởi động camera...'}</p>
-          {cameraError && (
-            <button type="button" onClick={startCamera}>Thử bật lại camera</button>
-          )}
+        <span className={`tmc-badge ${cameraBadge.cls}`}>{cameraBadge.text}</span>
+      </div>
+
+      <div className="gs-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+        {cameraState === 'ready' ? (
+          <div className="gs-camera-stage">
+            <video ref={videoRef} playsInline muted />
+            <div className="gs-camera-reticle" />
+          </div>
+        ) : cameraState === 'starting' ? (
+          <div className="ops-empty" aria-busy="true">
+            <p>Đang khởi động camera của thiết bị…</p>
+          </div>
+        ) : (
+          <div className="notice error" role="alert" style={{ width: '100%', margin: 0 }}>
+            <strong>{cameraNotice?.title || 'Camera chưa sẵn sàng'}</strong>
+            <p>{cameraNotice?.detail}</p>
+            <button type="button" className="tmc-btn-primary" onClick={startCamera} style={{ marginTop: 12 }}>
+              Thử bật lại camera
+            </button>
+          </div>
+        )}
+        {cameraState === 'ready' && cameraNotice && (
+          <div className="notice" role="status" style={{ width: '100%', margin: 0 }}>
+            <strong>{cameraNotice.title}</strong>
+            <p>{cameraNotice.detail}</p>
+          </div>
+        )}
+      </div>
+
+      <div className={`gs-result gs-result--${phase === 'sending' ? 'idle' : tone}`} role="status" aria-live="assertive">
+        {phase === 'sending' && <h2>Đang xác minh mã QR…</h2>}
+        {phase === 'idle' && (
+          <>
+            <h2>{cameraState === 'ready' ? 'Sẵn sàng quét' : 'Đang chờ camera sẵn sàng'}</h2>
+            <p>{cameraState === 'ready' ? 'Đưa mã QR trên màn hình điện thoại vào giữa khung ngắm.' : 'Cấp quyền hoặc kiểm tra thiết bị camera phía trên để bắt đầu quét.'}</p>
+          </>
+        )}
+        {(phase === 'result' || phase === 'error') && view && (
+          <>
+            <h2>{view.title}{view.offline && <span className="gs-badge gs-badge--offline">Offline</span>}</h2>
+            <p>{view.detail}</p>
+            {phase === 'result' && elapsedMs !== null && <p className="gs-meta">Thời gian xử lý: {elapsedMs} ms</p>}
+          </>
+        )}
+      </div>
+
+      {history.length > 0 && (
+        <div className="gs-panel">
+          <h3>Phiên quét vừa ghi nhận ({history.length})</h3>
+          <div className="hc-table-wrap">
+            <table className="gs-table">
+              <thead>
+                <tr>
+                  <th>Thời gian</th>
+                  <th>Chiều</th>
+                  <th>Kết quả</th>
+                  <th>Chi tiết</th>
+                  <th>Độ trễ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((item) => (
+                  <tr key={item.id}>
+                    <td className="mono">{item.time}</td>
+                    <td><code>{item.direction}</code></td>
+                    <td>{item.decision === 'ALLOW' ? 'Cho phép (ALLOW)' : item.decision === 'DENY' ? 'Từ chối (DENY)' : item.decision}</td>
+                    <td>{item.detail}</td>
+                    <td className="mono">{item.ms} ms</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
-    </div>
-
-    <div className={`gs-result gs-result--${phase === 'sending' ? 'idle' : tone}`} role="status" aria-live="assertive">
-      {phase === 'sending' && <h2>Đang xác minh mã QR…</h2>}
-      {phase === 'idle' && <h2>Sẵn sàng quét — vui lòng đưa mã QR vào khung ngắm</h2>}
-      {(phase === 'result' || phase === 'error') && view && <>
-        <h2>{view.title}{view.offline && <span className="gs-badge gs-badge--offline">Offline</span>}</h2>
-        <p>{view.detail}</p>
-        {phase === 'result' && elapsedMs !== null && <p className="gs-meta">Xử lý trong {elapsedMs} ms</p>}
-      </>}
-    </div>
-
-    {history.length > 0 && (
-      <div className="gs-panel">
-        <h3>Phiên quét vừa ghi nhận ({history.length})</h3>
-        <table className="gs-table">
-          <thead>
-            <tr>
-              <th>Thời gian</th>
-              <th>Chiều</th>
-              <th>Kết quả</th>
-              <th>Chi tiết</th>
-              <th>Độ trễ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {history.map((item) => (
-              <tr key={item.id}>
-                <td>{item.time}</td>
-                <td><code>{item.direction}</code></td>
-                <td>{item.decision}</td>
-                <td>{item.detail}</td>
-                <td>{item.ms} ms</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )}
-  </section>;
+    </section>
+  );
 }

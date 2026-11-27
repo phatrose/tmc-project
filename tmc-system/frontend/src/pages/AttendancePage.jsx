@@ -4,6 +4,43 @@ import { createAttendanceApi } from './attendanceApi.js';
 
 const attendanceApi = createAttendanceApi(request);
 
+const ANOMALY_LABELS = {
+  LATE_ARRIVAL: 'Đi trễ',
+  EARLY_LEAVE: 'Về sớm',
+  MISSING_OUT: 'Thiếu quẹt ra',
+  MISSING_IN: 'Thiếu quẹt vào',
+  CONSECUTIVE_ENTRY: 'Quẹt vào liên tiếp',
+  RAPID_REPEAT_SCAN: 'Quét lặp nhanh (<30s)',
+  POST_REVOKE_VIOLATION: 'Quẹt sau thu hồi',
+};
+
+function formatDateVi(isoDate) {
+  if (!isoDate || !/^\d{4}-\d{2}-\d{2}/.test(isoDate)) return isoDate || '—';
+  const [y, m, d] = isoDate.slice(0, 10).split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function formatDateTimeVi(raw, withTz = false) {
+  if (!raw) return '—';
+  const parsed = new Date(raw.includes('T') ? raw : raw.replace(' ', 'T') + 'Z');
+  if (Number.isNaN(parsed.getTime())) return raw;
+  const formatted = parsed.toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZone: withTz ? 'UTC' : undefined,
+  });
+  return withTz ? `${formatted} (UTC)` : formatted;
+}
+
+function anomalyText(code) {
+  return ANOMALY_LABELS[code] ? `${ANOMALY_LABELS[code]} (${code})` : code;
+}
+
 /**
  * PHỤ TRÁCH: Task 3.
  * VAI TRÒ: View — Chấm công, sự kiện bất biến, điều chỉnh & giả lập Edge Sync.
@@ -408,15 +445,17 @@ export default function AttendancePage({ session } = {}) {
 
   return (
     <section>
-      <p role="status" className="notice">
-        <strong>Màn hình mô phỏng.</strong> Dữ liệu và lựa chọn vai trò bên dưới chỉ dùng để minh họa nghiệp vụ trên trình duyệt, chưa lưu vào backend.
-      </p>
+      <div role="status" className="notice">
+        <strong>
+          {apiStatus === 'connected' ? 'Chế độ kết hợp (Central API + mô phỏng cục bộ).' : 'Màn hình mô phỏng.'}
+        </strong>{' '}
+        {apiMessage || 'Dữ liệu minh họa và thao tác tạo/duyệt điều chỉnh ở trang này chạy cục bộ trên trình duyệt, chưa ghi đè dữ liệu production.'}
+      </div>
 
       <div className="module-heading">
         <div>
-          <span className="module-label">Chấm công & sự kiện</span>
-          <h1>Chấm công & Tiếp nhận Sự kiện</h1>
-          <p>Theo dõi bảng công ngày, nhật ký sự kiện bất biến, yêu cầu điều chỉnh và kịch bản ca đêm qua tháng.</p>
+          <h1>Chấm công &amp; Tiếp nhận Sự kiện</h1>
+          <p>Theo dõi bảng công ngày, nhật ký sự kiện bất biến (UTC), yêu cầu điều chỉnh và kịch bản ca đêm qua tháng.</p>
         </div>
         <div className="tmc-field" style={{ minWidth: 260 }}>
           <label htmlFor="sim-user">Vai trò giả lập</label>
@@ -503,18 +542,18 @@ export default function AttendancePage({ session } = {}) {
                   .filter((r) => r.workDate.startsWith(selectedMonth))
                   .map((r) => (
                     <tr key={r.id}>
-                      <td className="mono"><strong>{r.workDate}</strong></td>
+                      <td className="mono"><strong>{formatDateVi(r.workDate)}</strong></td>
                       <td>{r.shiftName}</td>
                       <td className="mono">
-                        {r.firstIn || <span className="tmc-badge tmc-badge--danger">Thiếu quẹt</span>}
-                        {r.isLate && <div style={{ fontSize: 12, color: 'var(--danger-ink)' }}>+{r.lateMinutes}p trễ</div>}
+                        {r.firstIn ? formatDateTimeVi(r.firstIn) : <span className="tmc-badge tmc-badge--danger">Thiếu quẹt</span>}
+                        {r.isLate && <div style={{ fontSize: 12.5, color: 'var(--danger-ink)' }}>+{r.lateMinutes} phút trễ</div>}
                       </td>
                       <td className="mono">
-                        {r.lastOut || <span className="tmc-badge tmc-badge--danger">Thiếu quẹt</span>}
-                        {r.isEarlyLeave && <div style={{ fontSize: 12, color: 'var(--danger-ink)' }}>-{r.earlyMinutes}p sớm</div>}
+                        {r.lastOut ? formatDateTimeVi(r.lastOut) : <span className="tmc-badge tmc-badge--danger">Thiếu quẹt</span>}
+                        {r.isEarlyLeave && <div style={{ fontSize: 12.5, color: 'var(--danger-ink)' }}>-{r.earlyMinutes} phút sớm</div>}
                       </td>
                       <td>
-                        <strong>{r.hoursWorked === null ? 'Chưa đủ dữ liệu' : `${r.hoursWorked.toFixed(1)} h`}</strong>
+                        <strong>{r.hoursWorked === null ? 'Chưa đủ dữ liệu' : `${r.hoursWorked.toFixed(1)} giờ`}</strong>
                       </td>
                       <td>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -531,10 +570,10 @@ export default function AttendancePage({ session } = {}) {
                       <td>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
                           {r.anomalyFlags?.map((f) => (
-                            <span key={f} className="tmc-badge tmc-badge--warning">{f}</span>
+                            <span key={f} className="tmc-badge tmc-badge--warning" title={f}>{anomalyText(f)}</span>
                           ))}
                         </div>
-                        <small style={{ color: 'var(--muted)' }}>{r.note}</small>
+                        <small style={{ color: 'var(--muted)', fontSize: 13 }}>{r.note}</small>
                       </td>
                     </tr>
                   ))}
@@ -567,7 +606,7 @@ export default function AttendancePage({ session } = {}) {
               <tbody>
                 {events.map((e) => (
                   <tr key={e.eventId}>
-                    <td className="mono">{e.occurredAt}</td>
+                    <td className="mono">{formatDateTimeVi(e.occurredAt, true)}</td>
                     <td>
                       <span className={`tmc-badge ${e.direction === 'IN' ? 'tmc-badge--accent' : 'tmc-badge--warning'}`}>
                         {e.direction === 'IN' ? 'VÀO (IN)' : 'RA (OUT)'}
@@ -579,12 +618,12 @@ export default function AttendancePage({ session } = {}) {
                     <td className="mono">{e.jti}</td>
                     <td>
                       {e.flags?.length > 0 ? (
-                        e.flags.map((f) => <span key={f} className="tmc-badge tmc-badge--danger">{f}</span>)
+                        e.flags.map((f) => <span key={f} className="tmc-badge tmc-badge--danger" title={f}>{anomalyText(f)}</span>)
                       ) : (
                         <span className="tmc-badge tmc-badge--success">Bình thường</span>
                       )}
                     </td>
-                    <td className="mono" style={{ fontSize: 12, color: 'var(--muted)' }}>{e.payloadSha256}</td>
+                    <td className="mono" style={{ fontSize: 12.5, color: 'var(--muted)' }}>{e.payloadSha256}</td>
                   </tr>
                 ))}
               </tbody>
