@@ -149,6 +149,11 @@ class SqliteBatchIT {
         var batch = store.pendingBatch(50);
         var left = accept(first);
         var right = accept(second);
+        if (defect.equals("nullability")) {
+            assertThrows(NullPointerException.class, () -> new EventAck(second.eventId(), Status.DUPLICATE, null, null));
+            assertUnchanged(store, batch);
+            return;
+        }
         List<EventAck> acks = switch (defect) {
             case "missing" -> List.of(left);
             case "unknown" -> List.of(left, new EventAck(UUID.randomUUID(), Status.ACCEPTED, COMMITTED_AT, null));

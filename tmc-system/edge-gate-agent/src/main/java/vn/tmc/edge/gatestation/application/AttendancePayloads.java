@@ -21,12 +21,12 @@ final class AttendancePayloads {
     static AttendancePayload qr(UUID employeeId, Direction direction, ScanMode mode, UUID jti, String kid,
                                 Instant tokenIssuedAt, UUID commandId) {
         Source source = mode == ScanMode.OFFLINE ? Source.OFFLINE : Source.ONLINE;
-        return new AttendancePayload(employeeId.toString(), direction, source, jti.toString(), kid, tokenIssuedAt,
-                commandId.toString(), null, null);
+        return new AttendancePayload(employeeId, direction, source, jti, kid, tokenIssuedAt,
+                commandId, null, null);
     }
 
     static AttendancePayload manual(UUID employeeId, Direction direction, UUID operatorId, String reason, UUID commandId) {
-        return new AttendancePayload(employeeId.toString(), direction, Source.MANUAL, null, null, null,
-                commandId.toString(), operatorId.toString(), reason);
+        return new AttendancePayload(employeeId, direction, Source.MANUAL, null, null, null,
+                commandId, operatorId, reason);
     }
 }

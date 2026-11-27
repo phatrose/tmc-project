@@ -18,6 +18,15 @@ public record ActorContext(
         List<String> departmentIds,
         String scope) {
 
+    // PHỤ TRÁCH: Task 8. Adapter ID nội bộ Task 3 về contract do Task 1 sở hữu.
+    public ActorContext(java.util.UUID userId, java.util.UUID employeeId, List<Role> roles,
+            List<String> permissions, List<java.util.UUID> factoryIds,
+            List<java.util.UUID> departmentIds, String scope) {
+        this(userId.toString(), employeeId == null ? null : employeeId.toString(), roles, permissions,
+                factoryIds == null ? List.of() : factoryIds.stream().map(Object::toString).toList(),
+                departmentIds == null ? List.of() : departmentIds.stream().map(Object::toString).toList(), scope);
+    }
+
     public static final String SCOPE_SELF = "SELF";
     public static final String SCOPE_DEPARTMENT = "DEPARTMENT";
     public static final String SCOPE_FACTORY = "FACTORY";

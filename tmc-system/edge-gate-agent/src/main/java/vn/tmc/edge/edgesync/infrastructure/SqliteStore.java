@@ -180,7 +180,7 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal, Oper
         }
         var attendance = payload.value();
         if (attendance.source() == null
-                || reservation.employeeId() == null || !reservation.employeeId().toString().equals(attendance.employeeId())
+                || reservation.employeeId() == null || !reservation.employeeId().equals(attendance.employeeId())
                 || reservation.direction() == null || reservation.direction() != attendance.direction()
                 || !reservation.gateId().equals(draft.gateId())) {
             throw new IllegalArgumentException("Attendance and replay reservation must describe the same verified scan");
@@ -201,7 +201,7 @@ public final class SqliteStore implements LocalEventStorePort, SyncJournal, Oper
         }
         if (reservation.kind() != ReplayReservation.Kind.QR || attendance.kid() == null || attendance.kid().isBlank()
                 || attendance.tokenIssuedAt() == null || attendance.operatorId() != null || attendance.reason() != null
-                || !reservation.jti().toString().equals(attendance.jti())) {
+                || !reservation.jti().equals(attendance.jti())) {
             throw new IllegalArgumentException("QR attendance requires matching QR claims and null operator fields");
         }
         return new CommandIntent(commandId, gateId, null, null, CommandMode.QR);

@@ -52,8 +52,16 @@ public class AttendanceControllerTest {
     private static final UUID FACTORY_ID = UUID.fromString("00000000-0000-0000-0000-0000000000f1");
     private static final UUID EMP_ID = UUID.fromString("00000000-0000-0000-0000-000000000101");
 
+    private void actor(String userId) {
+        var actor=new vn.tmc.central.usermgmt.api.ActorContext(userId,EMP_ID.toString(),
+            List.of(vn.tmc.central.usermgmt.api.Role.HR),List.of("attendance.approve","report.read"),List.of(FACTORY_ID.toString()),List.of(),"FACTORY");
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+            new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(actor,null,List.of()));
+    }
+    @org.junit.jupiter.api.AfterEach void clearActor(){org.springframework.security.core.context.SecurityContextHolder.clearContext();}
     @BeforeEach
     void setUp() {
+        actor("00000000-0000-4000-8000-000000000001");
         repository = new InMemoryAttendanceRepository();
         adjustmentService = new AttendanceAdjustmentService(repository, repository);
         processingService = new AttendanceProcessingService(repository, repository, repository, adjustmentService);
@@ -118,6 +126,7 @@ public class AttendanceControllerTest {
         assertTrue(queryAdjResp.getBody().items().stream().anyMatch(a -> a.id().equals(adjId)));
 
         // 3. Phê duyệt yêu cầu điều chỉnh: POST /api/v1/attendance/adjustments/{id}/decision
+        actor("00000000-0000-4000-8000-000000000099");
         AdjustmentDecision decision = new AdjustmentDecision("APPROVE", "Đã xác minh camera bảo vệ", 1);
         ResponseEntity<Adjustment> decideResp = attendanceController.decideAdjustment(adjId, decision);
         assertEquals(HttpStatus.OK, decideResp.getStatusCode());

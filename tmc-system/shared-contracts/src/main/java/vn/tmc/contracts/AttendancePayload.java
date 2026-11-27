@@ -25,6 +25,13 @@ public record AttendancePayload(
         UUID operatorId,
         String reason
 ) {
+    // PHỤ TRÁCH: Task 8. String IDs from SQLite adapters retain the same validation.
+    public AttendancePayload(String employeeId, Direction direction, Source source, String jti, String kid,
+            Instant tokenIssuedAt, String commandId, String operatorId, String reason) {
+        this(UUID.fromString(employeeId),direction,source,jti==null?null:UUID.fromString(jti),kid,
+            tokenIssuedAt,UUID.fromString(commandId),operatorId==null?null:UUID.fromString(operatorId),reason);
+    }
+
     public enum Direction { IN, OUT }
     public enum Source { ONLINE, OFFLINE, MANUAL }
 

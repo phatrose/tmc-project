@@ -235,4 +235,47 @@ public class AttendanceSyncTest {
         EventEnvelope dup2 = createEnvelope(dupId, UUID.randomUUID().toString(), "IN", 2);
         assertThrows(IllegalArgumentException.class, () -> new SyncBatchRequest(UUID.randomUUID(), List.of(dup1, dup2)));
     }
+
+    @Test
+    @DisplayName("CONTRACT-EXAMPLES #4: Mixed ACK - event 1 ACCEPTED, event 2 direction=SIDEWAYS REJECTED INVALID_PAYLOAD, cursor=1")
+    void testContractExample4MixedAckSidewaysDirectionRejected() {
+        UUID ev1Id = UUID.fromString("01a1e73b-8500-7000-8000-000000000001");
+        UUID ev2Id = UUID.fromString("01a1e73b-8500-7000-8000-000000000002");
+        String empId = "00000000-0000-4000-8000-000000000011";
+
+        EventEnvelope env1 = createEnvelope(ev1Id, empId, "IN", 1);
+        String badPayload = "{\"commandId\":\"00000000-0000-4000-8000-000000000016\",\"direction\":\"SIDEWAYS\",\"employeeId\":\"" + empId + "\",\"jti\":\"00000000-0000-4000-8000-000000000015\",\"kid\":\"qr-key-2026-11\",\"operatorId\":null,\"reason\":null,\"source\":\"OFFLINE\",\"tokenIssuedAt\":\"2026-11-17T01:59:45.000Z\"}";
+        EventEnvelope env2 = new EventEnvelope(
+                ev2Id, EventEnvelope.EVT_ATTENDANCE_RECORDED, 1,
+                edgeId, gateId, factoryId, 2,
+                UUID.randomUUID(), Instant.parse("2026-11-17T02:00:00.000Z"),
+                EventEnvelope.computeSha256(badPayload), badPayload
+        );
+
+        UUID batchId = UUID.randomUUID();
+        SyncBatchRequest batch = new SyncBatchRequest(batchId, List.of(env1, env2));
+        SyncBatchAck ack = service.synchronize(deviceContext, batch);
+
+        assertEquals(Status.ACCEPTED, ack.acks().get(0).status());
+        assertEquals(Status.REJECTED, ack.acks().get(1).status());
+        assertEquals(SyncBatchAck.CODE_INVALID_PAYLOAD, ack.acks().get(1).code());
+        assertNull(ack.acks().get(1).acceptedAt());
+        assertEquals(1L, ack.lastContiguousSequenceNo());
+
+        // Retry nguyên lô: event 1 thành DUPLICATE, event 2 vẫn REJECTED
+        SyncBatchAck retryAck = service.synchronize(deviceContext, batch);
+        assertEquals(Status.DUPLICATE, retryAck.acks().get(0).status());
+        assertEquals(ack.acks().get(0).acceptedAt(), retryAck.acks().get(0).acceptedAt());
+        assertEquals(Status.REJECTED, retryAck.acks().get(1).status());
+        assertEquals(SyncBatchAck.CODE_INVALID_PAYLOAD, retryAck.acks().get(1).code());
+    }
+
+    @Test
+    @DisplayName("CONTRACT-EXAMPLES #5: DeviceContext không khớp edgeId/factoryId ném DeviceBindingException (403)")
+    void testDeviceBindingMismatchThrows403() {
+        EventEnvelope env = createEnvelope(UUID.randomUUID(), UUID.randomUUID().toString(), "IN", 1);
+        DeviceContext wrongDevice = new DeviceContext(UUID.randomUUID(), factoryId);
+        assertThrows(vn.tmc.central.attendanceprocessing.internal.service.DeviceBindingException.class,
+                () -> service.synchronize(wrongDevice, new SyncBatchRequest(UUID.randomUUID(), List.of(env))));
+    }
 }

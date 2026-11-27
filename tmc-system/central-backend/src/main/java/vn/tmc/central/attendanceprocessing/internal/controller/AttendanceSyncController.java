@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import vn.tmc.central.attendanceprocessing.api.AttendanceSync;
+import vn.tmc.central.attendanceprocessing.internal.service.DeviceBindingException;
 import vn.tmc.contracts.DeviceContext;
 import vn.tmc.contracts.SyncBatchAck;
 import vn.tmc.contracts.SyncBatchRequest;
@@ -20,6 +21,7 @@ import java.util.UUID;
  * Endpoint: POST /api/v1/attendance/sync (mTLS + edge/factory binding).
  */
 @RestController
+@org.springframework.context.annotation.Profile("!platform")
 @RequestMapping("/api/v1/attendance")
 public final class AttendanceSyncController {
     private final AttendanceSync service;
@@ -35,14 +37,17 @@ public final class AttendanceSyncController {
             @RequestHeader(value = "X-Factory-Id", required = false) String factoryIdHeader
     ) {
         if (batch == null || batch.syncBatchId() == null || batch.events() == null) {
-            return ResponseEntity.badRequest().build();
+            throw new IllegalArgumentException("SyncBatchRequest không hợp lệ.");
+        }
+        if (edgeIdHeader == null || edgeIdHeader.isBlank() || factoryIdHeader == null || factoryIdHeader.isBlank()) {
+            throw new DeviceBindingException("Thiết bị không thuộc phạm vi yêu cầu.");
         }
 
-        DeviceContext deviceContext = null;
-        if (edgeIdHeader != null && factoryIdHeader != null) {
-            try {
-                deviceContext = new DeviceContext(UUID.fromString(edgeIdHeader), UUID.fromString(factoryIdHeader));
-            } catch (IllegalArgumentException ignored) {}
+        DeviceContext deviceContext;
+        try {
+            deviceContext = new DeviceContext(UUID.fromString(edgeIdHeader.trim()), UUID.fromString(factoryIdHeader.trim()));
+        } catch (IllegalArgumentException invalid) {
+            throw new DeviceBindingException("Định danh thiết bị không hợp lệ.");
         }
 
         SyncBatchAck ack = service.synchronize(deviceContext, batch);

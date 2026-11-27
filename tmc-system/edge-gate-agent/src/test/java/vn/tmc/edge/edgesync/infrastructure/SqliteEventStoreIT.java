@@ -41,9 +41,9 @@ class SqliteEventStoreIT {
         var envelope = committed.envelope();
         assertEquals("access.attempt.denied", envelope.eventType());
         assertEquals(1, envelope.schemaVersion());
-        assertEquals(EDGE_ID.toString(), envelope.edgeId());
-        assertEquals(GATE_ID.toString(), envelope.gateId());
-        assertEquals(FACTORY_ID.toString(), envelope.factoryId());
+        assertEquals(EDGE_ID, envelope.edgeId());
+        assertEquals(GATE_ID, envelope.gateId());
+        assertEquals(FACTORY_ID, envelope.factoryId());
         assertEquals(OCCURRED_AT, envelope.occurredAt());
         assertEquals(COMMITTED_AT, committed.committedAt());
         assertEquals(committed, store.findEvent(envelope.eventId()).orElseThrow());
@@ -116,7 +116,7 @@ class SqliteEventStoreIT {
 
     @Test
     void append_scanOrigin_usesScanIdAsCorrelationId() {
-        assertEquals(SCAN_ID.toString(), store().append(deniedDraft(EDGE_ID, SCAN_ID)).envelope().correlationId());
+        assertEquals(SCAN_ID, store().append(deniedDraft(EDGE_ID, SCAN_ID)).envelope().correlationId());
     }
 
     @Test

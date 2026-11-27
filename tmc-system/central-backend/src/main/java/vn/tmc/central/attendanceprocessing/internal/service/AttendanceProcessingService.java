@@ -1,5 +1,10 @@
 package vn.tmc.central.attendanceprocessing.internal.service;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import vn.tmc.central.attendanceprocessing.api.Adjustment;
 import vn.tmc.central.attendanceprocessing.api.AdjustmentDecision;
 import vn.tmc.central.attendanceprocessing.api.AdjustmentRequest;
@@ -33,6 +38,9 @@ import vn.tmc.contracts.SyncBatchAck.EventAck;
 import vn.tmc.contracts.SyncBatchAck.Status;
 import vn.tmc.contracts.SyncBatchRequest;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -40,38 +48,51 @@ import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * PHỤ TRÁCH: Task 3.
  * VAI TRÒ: Service xử lý nghiệp vụ chấm công và tiếp nhận sự kiện theo CONTRACT-V1.md.
- * 
+ *
  * QUY TẮC CỐT LÕI:
  * - Per-event transaction: Một sự kiện lỗi không rollback cả batch.
- * - Idempotency: Trùng eventId cùng hash trả DUPLICATE (code = null, acceptedAt = commit time).
- * - Xung đột: Trùng eventId khác hash trả CONFLICT (code = "EVENT_CONTENT_CONFLICT", acceptedAt = null).
+ * - Idempotency: Trùng eventId cùng envelope & hash trả DUPLICATE (code = null, acceptedAt = commit time).
+ * - Xung đột: Trùng eventId khác hash hoặc metadata trả CONFLICT (code = "EVENT_CONTENT_CONFLICT", acceptedAt = null).
  * - Ca đêm: Bắt đầu 22:00 ngày cuối tháng trước, kết thúc 06:00 ngày 01, vẫn thuộc tháng trước (workDate = ngày bắt đầu ca).
  * - Bất biến: attendance_events không bao giờ bị UPDATE hoặc DELETE.
  */
 public final class AttendanceProcessingService implements AttendanceQueries, AttendanceSync {
     public static final ZoneId FACTORY_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
 
+    private static final Set<String> SUPPORTED_EVENT_TYPES = Set.of(
+            EventEnvelope.EVT_ATTENDANCE_RECORDED,
+            EventEnvelope.EVT_ACCESS_DENIED,
+            EventEnvelope.EVT_COMMAND_RESULT,
+            EventEnvelope.EVT_REPLAY_REPORTED
+    );
+
+    private static final ObjectMapper STRICT_JSON = new ObjectMapper(
+            JsonFactory.builder().configure(StreamReadFeature.STRICT_DUPLICATE_DETECTION, true).build())
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .enable(DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY);
+
     private final AttendanceRepository attendanceRepository;
     private final DailyAttendanceRepository dailyRepository;
     private final SyncConflictRepository conflictRepository;
     private final AttendanceAdjustmentPort adjustmentPort;
+    private final Map<String, String> syncBatchFingerprints = new ConcurrentHashMap<>();
 
     public AttendanceProcessingService(
             AttendanceRepository attendanceRepository,
@@ -108,20 +129,35 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
         Objects.requireNonNull(batch.syncBatchId(), "syncBatchId must not be null");
         Objects.requireNonNull(batch.events(), "events list must not be null");
 
-        List<EventAck> acks = new ArrayList<>(batch.events().size());
-        String edgeIdStr = deviceContext != null ? deviceContext.edgeId().toString() : null;
-
-        // Per-event transaction
-        for (EventEnvelope env : batch.events()) {
-            if (edgeIdStr == null && env.edgeId() != null) {
-                edgeIdStr = env.edgeId().toString();
+        if (deviceContext != null) {
+            for (EventEnvelope env : batch.events()) {
+                if (!deviceContext.edgeId().equals(env.edgeId())
+                        || !deviceContext.factoryId().equals(env.factoryId())) {
+                    throw new DeviceBindingException("Thiết bị không thuộc phạm vi yêu cầu.");
+                }
             }
+        }
+
+        String edgeIdStr = deviceContext != null
+                ? deviceContext.edgeId().toString()
+                : batch.events().getFirst().edgeId().toString();
+
+        // CONTRACT-V1 §7: (edgeId, syncBatchId) phải giữ nguyên thành phần lô khi retry; đổi nội dung trả 409.
+        String batchKey = edgeIdStr + "|" + batch.syncBatchId();
+        String batchFingerprint = computeBatchFingerprint(batch);
+        String previousFingerprint = syncBatchFingerprints.putIfAbsent(batchKey, batchFingerprint);
+        if (previousFingerprint != null && !previousFingerprint.equals(batchFingerprint)) {
+            throw new IdempotencyConflictException("syncBatchId đã được dùng cho một lô sự kiện khác.");
+        }
+
+        List<EventAck> acks = new ArrayList<>(batch.events().size());
+        for (EventEnvelope env : batch.events()) {
             EventAck ack = processSingleEvent(env);
             acks.add(ack);
         }
 
         long lastContiguousSeq = 0;
-        if (edgeIdStr != null && conflictRepository != null) {
+        if (conflictRepository != null) {
             lastContiguousSeq = computeContiguousSequence(edgeIdStr, batch.events(), acks);
             conflictRepository.updateLastContiguousSequenceNo(edgeIdStr, lastContiguousSeq);
         }
@@ -142,48 +178,55 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
     private EventAck processSingleEvent(EventEnvelope env) {
         Instant now = Instant.now();
 
-        // 1. Kiểm tra envelope hợp lệ
         if (env.eventId() == null || env.eventType() == null || env.payloadSha256() == null || env.payload() == null) {
             return EventAck.rejected(env.eventId() != null ? env.eventId() : UUID.randomUUID(), SyncBatchAck.CODE_INVALID_PAYLOAD);
         }
 
-        // 2. Kiểm tra tính toàn vẹn SHA-256
+        if (env.schemaVersion() != EventEnvelope.CURRENT_SCHEMA_VERSION) {
+            return EventAck.rejected(env.eventId(), SyncBatchAck.CODE_UNSUPPORTED_SCHEMA);
+        }
+
+        if (!SUPPORTED_EVENT_TYPES.contains(env.eventType())) {
+            return EventAck.rejected(env.eventId(), SyncBatchAck.CODE_UNSUPPORTED_EVENT_TYPE);
+        }
+
         if (!env.isHashValid()) {
             return EventAck.rejected(env.eventId(), SyncBatchAck.CODE_HASH_MISMATCH);
         }
 
-        // 3. Kiểm tra Idempotency & Conflict với Central
+        // 3. Kiểm tra Idempotency & Conflict toàn bộ envelope bất biến
         Optional<AttendanceEvent> existingOpt = attendanceRepository.findByEventId(env.eventId());
         if (existingOpt.isPresent()) {
             AttendanceEvent existing = existingOpt.get();
-            if (existing.getPayloadSha256().equalsIgnoreCase(env.payloadSha256())) {
-                // CONTRACT-V1 §7: Trùng eventId cùng hash -> DUPLICATE, acceptedAt = commit lần đầu, code = null
+            if (isSameImmutableEnvelope(existing, env)) {
                 return EventAck.duplicate(env.eventId(), existing.getReceivedAt());
-            } else {
-                // CONTRACT-V1 §7: Trùng eventId khác hash -> CONFLICT, code = "EVENT_CONTENT_CONFLICT", acceptedAt = null
-                if (conflictRepository != null) {
-                    SyncConflict conflict = new SyncConflict(
-                            "CONF-" + UUID.randomUUID(),
-                            env.eventId(),
-                            env.edgeId().toString(),
-                            existing.getPayloadSha256(),
-                            env.payloadSha256(),
-                            env.occurredAt(),
-                            now,
-                            "Different payload hash for existing eventId"
-                    );
-                    conflictRepository.recordConflict(conflict);
-                }
-                return EventAck.conflict(env.eventId(), SyncBatchAck.CODE_EVENT_CONTENT_CONFLICT);
             }
+            recordConflict(env, existing.getPayloadSha256(), now,
+                    "Different payload or immutable envelope metadata for existing eventId");
+            return EventAck.conflict(env.eventId(), SyncBatchAck.CODE_EVENT_CONTENT_CONFLICT);
         }
 
-        // 4. Bóc tách payload
-        ParsedPayload parsed = parsePayload(env.payload());
+        // 4. Kiểm tra trùng sequence theo edgeId cho eventId khác
+        Optional<AttendanceEvent> seqConflictOpt = attendanceRepository.findByEdgeIdAndSequenceNo(env.edgeId(), env.sequenceNo());
+        if (seqConflictOpt.isPresent() && !seqConflictOpt.get().getEventId().equals(env.eventId())) {
+            recordConflict(env, seqConflictOpt.get().getPayloadSha256(), now,
+                    "Sequence number already used by another eventId for edge");
+            return EventAck.conflict(env.eventId(), SyncBatchAck.CODE_SEQUENCE_CONFLICT);
+        }
 
-        // Nếu là access attempt denied (EVT-02), lưu log nhưng không tính công
-        if (EventEnvelope.EVT_ACCESS_DENIED.equals(env.eventType())) {
-            AttendanceEvent deniedEvent = new AttendanceEvent(
+        // 5. Parse & validate payload JSON nghiêm ngặt (ví dụ direction=SIDEWAYS phải bị REJECTED INVALID_PAYLOAD)
+        ParsedPayload parsed;
+        try {
+            parsed = parseAndValidatePayload(env.eventType(), env.payload());
+        } catch (IllegalArgumentException invalid) {
+            return EventAck.rejected(env.eventId(), SyncBatchAck.CODE_INVALID_PAYLOAD);
+        }
+
+        if (!EventEnvelope.EVT_ATTENDANCE_RECORDED.equals(env.eventType())) {
+            List<String> nonAttendanceFlags = EventEnvelope.EVT_ACCESS_DENIED.equals(env.eventType())
+                    ? List.of("ACCESS_DENIED")
+                    : List.of();
+            AttendanceEvent auxiliaryEvent = new AttendanceEvent(
                     env.eventId(),
                     env.eventType(),
                     env.schemaVersion(),
@@ -200,21 +243,20 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
                     parsed.jti,
                     parsed.kid,
                     parsed.tokenIssuedAt,
-                    parsed.commandId != null ? parsed.commandId : UUID.randomUUID(),
+                    parsed.commandId,
                     parsed.operatorId,
                     parsed.reason,
-                    List.of("ACCESS_DENIED"),
+                    nonAttendanceFlags,
                     env.payloadSha256(),
                     env.payload()
             );
-            attendanceRepository.saveEvent(deniedEvent);
+            attendanceRepository.saveEvent(auxiliaryEvent);
             return EventAck.accepted(env.eventId(), now);
         }
 
-        // 5. Phát hiện các bất thường (Anomalies)
+        // 6. Phát hiện bất thường (Anomalies) cho attendance.event.recorded
         List<String> flags = new ArrayList<>();
 
-        // a) Kiểm tra Replay JTI giữa các Edge / Cổng khác nhau (CROSS_GATE_REPLAY / REPLAY_SUSPECTED)
         if (parsed.jti != null) {
             List<AttendanceEvent> sameJtiEvents = attendanceRepository.findByJti(parsed.jti);
             if (!sameJtiEvents.isEmpty()) {
@@ -227,7 +269,6 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
             }
         }
 
-        // b) Kiểm tra quét lặp nghiệp vụ trong 30 giây (RAPID_REPEAT_SCAN - BR-03)
         Optional<AttendanceEvent> lastEventOpt = attendanceRepository.findLastByEmployeeId(parsed.employeeId);
         if (lastEventOpt.isPresent()) {
             Duration diff = Duration.between(lastEventOpt.get().getObservedAt(), env.occurredAt()).abs();
@@ -236,7 +277,7 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
             }
         }
 
-        // 6. Ghi nhận AttendanceEvent bất biến vào database
+        // 7. Ghi nhận AttendanceEvent bất biến
         AttendanceEvent newEvent = new AttendanceEvent(
                 env.eventId(),
                 env.eventType(),
@@ -263,19 +304,60 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
         );
         attendanceRepository.saveEvent(newEvent);
 
-        // 7. Cập nhật bản ghi dẫn xuất daily_attendance_records và tính công theo ca
         if (dailyRepository != null) {
-            updateDailyAttendance(newEvent, parsed);
+            updateDailyAttendance(newEvent);
         }
 
         return EventAck.accepted(env.eventId(), now);
     }
 
-    private void updateDailyAttendance(AttendanceEvent event, ParsedPayload parsed) {
+    private void recordConflict(EventEnvelope env, String existingHash, Instant now, String details) {
+        if (conflictRepository == null) {
+            return;
+        }
+        conflictRepository.recordConflict(new SyncConflict(
+                "CONF-" + UUID.randomUUID(),
+                env.eventId(),
+                env.edgeId().toString(),
+                existingHash,
+                env.payloadSha256(),
+                env.occurredAt(),
+                now,
+                details
+        ));
+    }
+
+    private static boolean isSameImmutableEnvelope(AttendanceEvent existing, EventEnvelope env) {
+        return existing.getPayloadSha256().equalsIgnoreCase(env.payloadSha256())
+                && Objects.equals(existing.getEventType(), env.eventType())
+                && existing.getSchemaVersion() == env.schemaVersion()
+                && Objects.equals(existing.getEdgeId(), env.edgeId())
+                && Objects.equals(existing.getGateId(), env.gateId())
+                && Objects.equals(existing.getFactoryId(), env.factoryId())
+                && existing.getSequenceNo() == env.sequenceNo()
+                && Objects.equals(existing.getCorrelationId(), env.correlationId())
+                && Objects.equals(existing.getObservedAt(), env.occurredAt());
+    }
+
+    private static String computeBatchFingerprint(SyncBatchRequest batch) {
+        StringBuilder sb = new StringBuilder();
+        for (EventEnvelope env : batch.events()) {
+            sb.append(env.eventId()).append('|')
+                    .append(env.sequenceNo()).append('|')
+                    .append(env.payloadSha256()).append('\n');
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(sb.toString().getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    private void updateDailyAttendance(AttendanceEvent event) {
         ZonedDateTime zdt = event.getObservedAt().atZone(FACTORY_ZONE);
         boolean isCheckIn = event.getDirection() == Direction.IN;
 
-        // Xác định ca và workDate: ca đêm bắt đầu cuối tháng trước kết thúc 06:00 ngày 01 vẫn thuộc tháng trước!
         ShiftAssignment assignment = ShiftDefinition.determineShiftAndWorkDate(zdt, isCheckIn);
         LocalDate workDate = assignment.workDate();
         ShiftDefinition shift = assignment.shift();
@@ -298,7 +380,6 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
                 daily.setFirstIn(event.getObservedAt());
             }
 
-            // Kiểm tra đi trễ
             LocalTime eventTime = zdt.toLocalTime();
             LocalTime shiftStart = shift.startTime();
             if (shift.isCrossDay() && eventTime.isBefore(LocalTime.of(12, 0))) {
@@ -314,7 +395,6 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
                 daily.addFlag("LATE_ARRIVAL");
             }
         } else {
-            // Check-OUT
             if (daily.getFirstIn() == null) {
                 daily.addFlag("CONSECUTIVE_EXIT");
                 daily.addFlag("MISSING_IN");
@@ -323,7 +403,6 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
                 daily.setLastOut(event.getObservedAt());
             }
 
-            // Kiểm tra về sớm
             LocalTime eventTime = zdt.toLocalTime();
             LocalTime shiftEnd = shift.endTime();
             if (shift.isCrossDay()) {
@@ -342,7 +421,6 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
             }
         }
 
-        // QUY TẮC CONTRACT-V1 §9: Thiếu IN/OUT thì workedMinutes = null, không coi 0 giờ đã xác nhận.
         if (daily.getFirstIn() != null && daily.getLastOut() != null) {
             long totalMinutes = Duration.between(daily.getFirstIn(), daily.getLastOut()).toMinutes();
             daily.setWorkedMinutes((int) Math.max(0, totalMinutes));
@@ -379,10 +457,8 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
         for (long seq : acceptedSeqs) {
             if (seq == current + 1) {
                 current = seq;
-            } else if (seq <= current) {
-                // Đã trong vùng
-            } else {
-                break; // Gap phát hiện, dừng cursor
+            } else if (seq > current + 1) {
+                break;
             }
         }
         return current;
@@ -393,11 +469,17 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
     @Override
     public Page<DailyAttendance> dailyRecords(ActorContext context, AttendanceFilter filter) {
         Objects.requireNonNull(filter, "filter must not be null");
+        UUID scopedEmployeeId = enforceEmployeeScope(context, filter.employeeId());
+        enforceFactoryScope(context, filter.factoryId());
+
         List<DailyAttendanceRecord> list = dailyRepository.findByEmployeeIdAndDateRange(
-                filter.employeeId(),
+                scopedEmployeeId,
                 filter.from(),
-                filter.to() // Khoảng [from, to)
-        );
+                filter.to()
+        ).stream()
+                .filter(r -> filter.factoryId() == null || filter.factoryId().equals(r.getFactoryId()))
+                .filter(r -> isFactoryAllowed(context, r.getFactoryId()))
+                .toList();
 
         int start = Math.min(filter.page() * filter.size(), list.size());
         int end = Math.min(start + filter.size(), list.size());
@@ -410,12 +492,24 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
 
     @Override
     public Page<AttendanceEventView> queryEvents(ActorContext context, UUID employeeId, UUID factoryId, Instant from, Instant to, int page, int size) {
-        List<AttendanceEvent> raw = attendanceRepository.findByEmployeeIdAndDateRange(employeeId, from, to);
-        if (factoryId != null) {
-            raw = raw.stream().filter(e -> factoryId.equals(e.getFactoryId())).toList();
+        validatePaging(page, size);
+        UUID scopedEmployeeId = enforceEmployeeScope(context, employeeId);
+        enforceFactoryScope(context, factoryId);
+
+        Instant effectiveTo = to != null ? to : Instant.now();
+        Instant effectiveFrom = from != null ? from : effectiveTo.minus(7, ChronoUnit.DAYS);
+        if (!effectiveFrom.isBefore(effectiveTo)) {
+            throw new IllegalArgumentException("from phải nhỏ hơn to.");
+        }
+        if (Duration.between(effectiveFrom, effectiveTo).toDays() > 366) {
+            throw new IllegalArgumentException("Khoảng thời gian tra cứu không được vượt quá 366 ngày.");
         }
 
-        // Sắp theo occurredAt giảm dần rồi id giảm dần (CONTRACT-V1 §2)
+        List<AttendanceEvent> raw = attendanceRepository.findByEmployeeIdAndDateRange(scopedEmployeeId, effectiveFrom, effectiveTo).stream()
+                .filter(e -> factoryId == null || factoryId.equals(e.getFactoryId()))
+                .filter(e -> isFactoryAllowed(context, e.getFactoryId()))
+                .toList();
+
         int start = Math.min(page * size, raw.size());
         int end = Math.min(start + size, raw.size());
         List<AttendanceEventView> paged = raw.subList(start, end).stream()
@@ -448,10 +542,14 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
 
         Map<UUID, AttendanceEvent> latestByEmp = new HashMap<>();
         for (AttendanceEvent e : events) {
-            latestByEmp.putIfAbsent(e.getEmployeeId(), e);
+            if (EventEnvelope.EVT_ATTENDANCE_RECORDED.equals(e.getEventType())
+                    && e.getEmployeeId() != null && e.getDirection() != null) {
+                latestByEmp.putIfAbsent(e.getEmployeeId(), e);
+            }
         }
 
         List<PresenceItem> items = latestByEmp.values().stream()
+                .sorted(Comparator.comparing(AttendanceEvent::getEmployeeId))
                 .map(e -> new PresenceItem(e.getEmployeeId(), e.getDirection().name(), e.getObservedAt()))
                 .toList();
 
@@ -460,8 +558,10 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
 
     @Override
     public Page<Adjustment> queryAdjustments(ActorContext context, UUID employeeId, String state, int page, int size) {
+        validatePaging(page, size);
+        UUID scopedEmployeeId = enforceEmployeeScope(context, employeeId);
         if (adjustmentPort != null) {
-            return adjustmentPort.queryAdjustments(context, employeeId, state, page, size);
+            return adjustmentPort.queryAdjustments(context, scopedEmployeeId, state, page, size);
         }
         return Page.empty(page, size);
     }
@@ -515,7 +615,7 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
     public MonthlyAttendanceSummaryView getMonthlySummary(String employeeId, YearMonth period, String factoryId) {
         UUID empUuid = parseUuidSafe(employeeId);
         LocalDate start = period.atDay(1);
-        LocalDate end = period.atEndOfMonth().plusDays(1); // Nửa mở [start, end)
+        LocalDate end = period.atEndOfMonth().plusDays(1);
 
         List<DailyAttendanceRecord> monthRecords = dailyRepository.findByEmployeeIdAndDateRange(empUuid, start, end);
 
@@ -570,6 +670,42 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
         );
     }
 
+    private static void validatePaging(int page, int size) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new IllegalArgumentException("page phải >= 0 và size phải từ 1 đến 100.");
+        }
+    }
+
+    private static UUID enforceEmployeeScope(ActorContext context, UUID requestedEmployeeId) {
+        if (context == null || !ActorContext.SCOPE_SELF.equals(context.scope())) {
+            return requestedEmployeeId;
+        }
+        if (context.employeeId() == null || context.employeeId().isBlank()) {
+            throw new SecurityException("Tài khoản SELF chưa liên kết nhân viên.");
+        }
+        UUID selfId = UUID.fromString(context.employeeId());
+        if (requestedEmployeeId != null && !selfId.equals(requestedEmployeeId)) {
+            throw new SecurityException("Tài khoản SELF chỉ được xem dữ liệu chấm công của chính mình.");
+        }
+        return selfId;
+    }
+
+    private static void enforceFactoryScope(ActorContext context, UUID requestedFactoryId) {
+        if (context == null || ActorContext.SCOPE_GLOBAL.equals(context.scope()) || requestedFactoryId == null) {
+            return;
+        }
+        if (!context.factoryIds().isEmpty() && !context.factoryIds().contains(requestedFactoryId.toString())) {
+            throw new SecurityException("Không có quyền truy cập nhà máy ngoài phạm vi được gán.");
+        }
+    }
+
+    private static boolean isFactoryAllowed(ActorContext context, UUID factoryId) {
+        if (context == null || ActorContext.SCOPE_GLOBAL.equals(context.scope()) || context.factoryIds().isEmpty()) {
+            return true;
+        }
+        return factoryId != null && context.factoryIds().contains(factoryId.toString());
+    }
+
     private static UUID parseUuidSafe(String val) {
         if (val == null) return UUID.randomUUID();
         try {
@@ -591,41 +727,181 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
             String reason
     ) {}
 
-    private ParsedPayload parsePayload(String raw) {
-        if (raw == null) {
-            return new ParsedPayload(UUID.randomUUID(), Direction.IN, Source.ONLINE, null, null, null, UUID.randomUUID(), null, null);
+    private static ParsedPayload parseAndValidatePayload(String eventType, String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException("Payload rỗng");
+        }
+        JsonNode root;
+        try {
+            root = STRICT_JSON.readTree(raw);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Payload không phải JSON hợp lệ", e);
+        }
+        if (root == null || !root.isObject()) {
+            throw new IllegalArgumentException("Payload phải là JSON object");
         }
 
-        String emp = extractJsonField(raw, "employeeId");
-        String dir = extractJsonField(raw, "direction");
-        String src = extractJsonField(raw, "source");
-        String jtiStr = extractJsonField(raw, "jti");
-        String kid = extractJsonField(raw, "kid");
-        String iatStr = extractJsonField(raw, "tokenIssuedAt");
-        String cmdStr = extractJsonField(raw, "commandId");
-        String opStr = extractJsonField(raw, "operatorId");
-        String rsn = extractJsonField(raw, "reason");
-
-        UUID empId = emp != null ? parseUuidSafe(emp) : UUID.randomUUID();
-        Direction direction = (dir != null && dir.equalsIgnoreCase("OUT")) ? Direction.OUT : Direction.IN;
-        Source source = Source.ONLINE;
-        if (src != null) {
-            try { source = Source.valueOf(src.toUpperCase()); } catch (Exception ignored) {}
-        }
-        UUID jti = jtiStr != null ? parseUuidSafe(jtiStr) : null;
-        Instant tokenIssuedAt = iatStr != null ? Instant.parse(iatStr) : null;
-        UUID commandId = cmdStr != null ? parseUuidSafe(cmdStr) : UUID.randomUUID();
-        UUID operatorId = opStr != null ? parseUuidSafe(opStr) : null;
-
-        return new ParsedPayload(empId, direction, source, jti, kid, tokenIssuedAt, commandId, operatorId, rsn);
+        return switch (eventType) {
+            case EventEnvelope.EVT_ATTENDANCE_RECORDED -> parseAttendancePayload(root);
+            case EventEnvelope.EVT_ACCESS_DENIED -> parseAccessDeniedPayload(root);
+            case EventEnvelope.EVT_COMMAND_RESULT -> parseCommandResultPayload(root);
+            case EventEnvelope.EVT_REPLAY_REPORTED -> parseReplayReportPayload(root);
+            default -> throw new IllegalArgumentException("Loại sự kiện không được hỗ trợ");
+        };
     }
 
-    private static String extractJsonField(String json, String field) {
-        Pattern pattern = Pattern.compile("\"" + field + "\"\\s*:\\s*\"([^\"]*)\"");
-        Matcher matcher = pattern.matcher(json);
-        if (matcher.find()) {
-            return matcher.group(1);
+    private static ParsedPayload parseAttendancePayload(JsonNode root) {
+        UUID employeeId = requireUuidField(root, "employeeId");
+        String dirStr = requireTextField(root, "direction");
+        Direction direction;
+        try {
+            direction = Direction.valueOf(dirStr);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("direction phải là IN hoặc OUT");
         }
-        return null;
+
+        Source source = Source.ONLINE;
+        JsonNode srcNode = root.get("source");
+        if (srcNode != null && !srcNode.isNull()) {
+            if (!srcNode.isTextual()) {
+                throw new IllegalArgumentException("source phải là chuỗi");
+            }
+            try {
+                source = Source.valueOf(srcNode.asText());
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("source không hợp lệ");
+            }
+        }
+
+        UUID jti = optionalUuidField(root, "jti");
+        String kid = optionalTextField(root, "kid");
+        Instant tokenIssuedAt = optionalInstantField(root, "tokenIssuedAt");
+        UUID commandId = optionalUuidField(root, "commandId");
+        UUID operatorId = optionalUuidField(root, "operatorId");
+        String reason = optionalTextField(root, "reason");
+
+        if (source == Source.MANUAL) {
+            if (operatorId == null || reason == null || reason.isBlank()) {
+                throw new IllegalArgumentException("Sự kiện MANUAL yêu cầu operatorId và reason");
+            }
+            if (jti != null || kid != null || tokenIssuedAt != null) {
+                throw new IllegalArgumentException("Sự kiện MANUAL không được chứa trường token");
+            }
+        } else {
+            if (operatorId != null || reason != null) {
+                throw new IllegalArgumentException("Sự kiện QR không được chứa operatorId hoặc reason");
+            }
+        }
+
+        return new ParsedPayload(employeeId, direction, source, jti, kid, tokenIssuedAt, commandId, operatorId, reason);
+    }
+
+    private static ParsedPayload parseAccessDeniedPayload(JsonNode root) {
+        requireTextField(root, "reasonCode");
+        UUID employeeId = optionalUuidField(root, "employeeId");
+        UUID jti = optionalUuidField(root, "jti");
+        String kid = optionalTextField(root, "kid");
+        Source source = Source.ONLINE;
+        JsonNode srcNode = root.get("source");
+        if (srcNode != null && !srcNode.isNull()) {
+            if (!srcNode.isTextual()) {
+                throw new IllegalArgumentException("source phải là chuỗi");
+            }
+            String srcText = srcNode.asText();
+            if (!"ONLINE".equals(srcText) && !"OFFLINE".equals(srcText)) {
+                throw new IllegalArgumentException("source của access.attempt.denied phải là ONLINE hoặc OFFLINE");
+            }
+            source = Source.valueOf(srcText);
+        }
+        return new ParsedPayload(employeeId, null, source, jti, kid, null, null, null, null);
+    }
+
+    private static ParsedPayload parseCommandResultPayload(JsonNode root) {
+        UUID commandId = requireUuidField(root, "commandId");
+        optionalUuidField(root, "attendanceEventId");
+        String mode = requireTextField(root, "mode");
+        if (!"QR".equals(mode) && !"MANUAL".equals(mode) && !"EMERGENCY".equals(mode)) {
+            throw new IllegalArgumentException("mode không hợp lệ");
+        }
+        String status = requireTextField(root, "status");
+        if (!"UNLOCK_ACCEPTED".equals(status) && !"FAILED".equals(status) && !"TIMEOUT".equals(status)) {
+            throw new IllegalArgumentException("status không hợp lệ");
+        }
+        if (optionalInstantField(root, "completedAt") == null) {
+            throw new IllegalArgumentException("completedAt bắt buộc");
+        }
+        UUID operatorId = optionalUuidField(root, "operatorId");
+        String reason = optionalTextField(root, "reason");
+        return new ParsedPayload(null, null, Source.ONLINE, null, null, null, commandId, operatorId, reason);
+    }
+
+    private static ParsedPayload parseReplayReportPayload(JsonNode root) {
+        JsonNode items = root.get("items");
+        if (items == null || !items.isArray() || items.size() > 50) {
+            throw new IllegalArgumentException("replay.cache.reported yêu cầu mảng items tối đa 50 phần tử");
+        }
+        for (JsonNode item : items) {
+            if (!item.isObject()) {
+                throw new IllegalArgumentException("Mỗi phần tử replay report phải là object");
+            }
+            requireUuidField(item, "jti");
+            requireUuidField(item, "firstEventId");
+            if (optionalInstantField(item, "seenAt") == null || optionalInstantField(item, "expiresAt") == null) {
+                throw new IllegalArgumentException("seenAt và expiresAt bắt buộc");
+            }
+        }
+        return new ParsedPayload(null, null, Source.ONLINE, null, null, null, null, null, null);
+    }
+
+    private static UUID requireUuidField(JsonNode root, String field) {
+        String text = requireTextField(root, field);
+        try {
+            return UUID.fromString(text);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(field + " phải là UUID hợp lệ", e);
+        }
+    }
+
+    private static UUID optionalUuidField(JsonNode root, String field) {
+        String text = optionalTextField(root, field);
+        if (text == null) {
+            return null;
+        }
+        try {
+            return UUID.fromString(text);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(field + " phải là UUID hợp lệ", e);
+        }
+    }
+
+    private static String requireTextField(JsonNode root, String field) {
+        JsonNode node = root.get(field);
+        if (node == null || !node.isTextual() || node.asText().isBlank()) {
+            throw new IllegalArgumentException("Thiếu trường bắt buộc: " + field);
+        }
+        return node.asText();
+    }
+
+    private static String optionalTextField(JsonNode root, String field) {
+        JsonNode node = root.get(field);
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (!node.isTextual()) {
+            throw new IllegalArgumentException(field + " phải là chuỗi");
+        }
+        return node.asText();
+    }
+
+    private static Instant optionalInstantField(JsonNode root, String field) {
+        String text = optionalTextField(root, field);
+        if (text == null) {
+            return null;
+        }
+        try {
+            return Instant.parse(text);
+        } catch (Exception e) {
+            throw new IllegalArgumentException(field + " phải là Instant ISO-8601 hợp lệ", e);
+        }
     }
 }

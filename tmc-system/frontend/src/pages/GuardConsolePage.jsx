@@ -123,7 +123,7 @@ export default function GuardConsolePage() {
   const disabled = busy || isAuditor || !session;
 
   return <section aria-labelledby="guard-title">
-    <h1 id="guard-title">Bảng điều khiển bảo vệ</h1>
+    <div className="module-heading"><span className="module-label">ĐIỀU PHỐI & AN NINH</span><h1 id="guard-title">Bảng điều khiển bảo vệ</h1><p>Thực hiện thao tác được cấp quyền và theo dõi hiện diện tại cổng.</p></div>
     {!session && <p className="notice" role="status">Cần đăng nhập để mở cổng thủ công hoặc khẩn cấp.</p>}
     {isAuditor && <p className="notice" role="status">Tài khoản Auditor chỉ được xem, không được mở cổng.</p>}
 

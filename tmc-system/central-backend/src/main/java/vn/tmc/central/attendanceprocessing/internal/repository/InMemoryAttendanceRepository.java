@@ -28,7 +28,12 @@ public class InMemoryAttendanceRepository implements
         AttendanceAdjustmentRepository,
         SyncConflictRepository {
 
+    private static final Comparator<AttendanceEvent> EVENT_WIRE_ORDER =
+            Comparator.comparing(AttendanceEvent::getObservedAt, Comparator.reverseOrder())
+                    .thenComparing(AttendanceEvent::getEventId, Comparator.reverseOrder());
+
     private final Map<UUID, AttendanceEvent> eventsByUuid = new ConcurrentHashMap<>();
+    private final Map<String, AttendanceEvent> eventsByEdgeAndSeq = new ConcurrentHashMap<>();
     private final Map<UUID, AttendanceEvent> eventsByJti = new ConcurrentHashMap<>();
     private final Map<String, DailyAttendanceRecord> dailyRecords = new ConcurrentHashMap<>();
     private final Map<UUID, AttendanceAdjustment> adjustments = new ConcurrentHashMap<>();
@@ -52,9 +57,16 @@ public class InMemoryAttendanceRepository implements
     }
 
     @Override
+    public Optional<AttendanceEvent> findByEdgeIdAndSequenceNo(UUID edgeId, long sequenceNo) {
+        if (edgeId == null) return Optional.empty();
+        return Optional.ofNullable(eventsByEdgeAndSeq.get(edgeId + ":" + sequenceNo));
+    }
+
+    @Override
     public void saveEvent(AttendanceEvent event) {
         if (event == null) return;
         eventsByUuid.putIfAbsent(event.getEventId(), event);
+        eventsByEdgeAndSeq.putIfAbsent(event.getEdgeId() + ":" + event.getSequenceNo(), event);
         if (event.getJti() != null) {
             eventsByJti.putIfAbsent(event.getJti(), event);
         }
@@ -63,23 +75,20 @@ public class InMemoryAttendanceRepository implements
     @Override
     public List<AttendanceEvent> findByEmployeeIdAndDateRange(UUID employeeId, Instant from, Instant to) {
         return eventsByUuid.values().stream()
-                .filter(e -> employeeId == null || e.getEmployeeId().equals(employeeId))
+                .filter(e -> employeeId == null || employeeId.equals(e.getEmployeeId()))
                 .filter(e -> (from == null || !e.getObservedAt().isBefore(from)) &&
                              (to == null || e.getObservedAt().isBefore(to)))
-                // Sắp theo occurredAt giảm dần rồi id giảm dần (CONTRACT-V1 §2)
-                .sorted(Comparator.comparing(AttendanceEvent::getObservedAt).reversed()
-                        .thenComparing(AttendanceEvent::getEventId).reversed())
+                .sorted(EVENT_WIRE_ORDER)
                 .toList();
     }
 
     @Override
     public List<AttendanceEvent> findByFactoryIdAndDateRange(UUID factoryId, Instant from, Instant to) {
         return eventsByUuid.values().stream()
-                .filter(e -> factoryId == null || e.getFactoryId().equals(factoryId))
+                .filter(e -> factoryId == null || factoryId.equals(e.getFactoryId()))
                 .filter(e -> (from == null || !e.getObservedAt().isBefore(from)) &&
                              (to == null || e.getObservedAt().isBefore(to)))
-                .sorted(Comparator.comparing(AttendanceEvent::getObservedAt).reversed()
-                        .thenComparing(AttendanceEvent::getEventId).reversed())
+                .sorted(EVENT_WIRE_ORDER)
                 .toList();
     }
 
@@ -93,16 +102,17 @@ public class InMemoryAttendanceRepository implements
 
     @Override
     public Optional<AttendanceEvent> findLastByEmployeeId(UUID employeeId) {
+        if (employeeId == null) return Optional.empty();
         return eventsByUuid.values().stream()
-                .filter(e -> e.getEmployeeId().equals(employeeId))
+                .filter(e -> employeeId.equals(e.getEmployeeId()))
                 .max(Comparator.comparing(AttendanceEvent::getObservedAt));
     }
 
     @Override
     public List<AttendanceEvent> findLatestEventsByFactoryId(UUID factoryId) {
         return eventsByUuid.values().stream()
-                .filter(e -> factoryId == null || e.getFactoryId().equals(factoryId))
-                .sorted(Comparator.comparing(AttendanceEvent::getObservedAt).reversed())
+                .filter(e -> factoryId == null || factoryId.equals(e.getFactoryId()))
+                .sorted(EVENT_WIRE_ORDER)
                 .toList();
     }
 
@@ -129,7 +139,7 @@ public class InMemoryAttendanceRepository implements
     @Override
     public List<DailyAttendanceRecord> findByEmployeeIdAndDateRange(UUID employeeId, LocalDate fromDate, LocalDate toDate) {
         return dailyRecords.values().stream()
-                .filter(r -> employeeId == null || r.getEmployeeId().equals(employeeId))
+                .filter(r -> employeeId == null || employeeId.equals(r.getEmployeeId()))
                 .filter(r -> (fromDate == null || !r.getWorkDate().isBefore(fromDate)) &&
                              (toDate == null || r.getWorkDate().isBefore(toDate)))
                 .sorted(Comparator.comparing(DailyAttendanceRecord::getWorkDate))
@@ -139,7 +149,7 @@ public class InMemoryAttendanceRepository implements
     @Override
     public List<DailyAttendanceRecord> findByFactoryIdAndDateRange(UUID factoryId, LocalDate fromDate, LocalDate toDate) {
         return dailyRecords.values().stream()
-                .filter(r -> factoryId == null || r.getFactoryId().equals(factoryId))
+                .filter(r -> factoryId == null || factoryId.equals(r.getFactoryId()))
                 .filter(r -> (fromDate == null || !r.getWorkDate().isBefore(fromDate)) &&
                              (toDate == null || r.getWorkDate().isBefore(toDate)))
                 .sorted(Comparator.comparing(DailyAttendanceRecord::getWorkDate))
@@ -164,7 +174,7 @@ public class InMemoryAttendanceRepository implements
     @Override
     public List<AttendanceAdjustment> findByEmployeeId(UUID employeeId) {
         return adjustments.values().stream()
-                .filter(a -> employeeId == null || a.getEmployeeId().equals(employeeId))
+                .filter(a -> employeeId == null || employeeId.equals(a.getEmployeeId()))
                 .sorted(Comparator.comparing(AttendanceAdjustment::getCreatedAt).reversed())
                 .toList();
     }
@@ -179,7 +189,9 @@ public class InMemoryAttendanceRepository implements
 
     @Override
     public List<AttendanceAdjustment> findAll() {
-        return new ArrayList<>(adjustments.values());
+        return adjustments.values().stream()
+                .sorted(Comparator.comparing(AttendanceAdjustment::getCreatedAt).reversed())
+                .toList();
     }
 
     @Override

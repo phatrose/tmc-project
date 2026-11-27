@@ -15,6 +15,9 @@ import java.util.UUID;
 public interface AttendanceRepository {
     Optional<AttendanceEvent> findByEventId(UUID eventId);
     boolean existsByEventId(UUID eventId);
+    default Optional<AttendanceEvent> findByEdgeIdAndSequenceNo(UUID edgeId, long sequenceNo) {
+        return Optional.empty();
+    }
     void saveEvent(AttendanceEvent event);
     List<AttendanceEvent> findByEmployeeIdAndDateRange(UUID employeeId, Instant from, Instant to);
     List<AttendanceEvent> findByFactoryIdAndDateRange(UUID factoryId, Instant from, Instant to);

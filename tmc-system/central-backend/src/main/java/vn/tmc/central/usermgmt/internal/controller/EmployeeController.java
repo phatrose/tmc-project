@@ -1,5 +1,7 @@
 package vn.tmc.central.usermgmt.internal.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -7,6 +9,8 @@ import org.springframework.web.bind.annotation.*;
 import vn.tmc.central.usermgmt.api.*;
 import vn.tmc.central.usermgmt.api.Authentication.ActionGrantRequest;
 import vn.tmc.central.usermgmt.api.Authentication.LoginRequest;
+import vn.tmc.central.usermgmt.api.Authentication.ReauthRequest;
+import vn.tmc.central.usermgmt.api.Authentication.ReauthResponse;
 import vn.tmc.central.usermgmt.api.EmployeeManagement.*;
 import vn.tmc.central.usermgmt.internal.service.AccountLockedException;
 import vn.tmc.central.usermgmt.internal.service.EmployeeNotFoundException;
@@ -15,8 +19,18 @@ import vn.tmc.central.usermgmt.internal.service.InvalidCredentialsException;
 import vn.tmc.central.usermgmt.internal.service.VersionConflictException;
 import vn.tmc.contracts.ApiError;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * PHỤ TRÁCH: Task 1.
@@ -24,11 +38,23 @@ import java.util.UUID;
  * Theo CONTRACT-V1.md §2, §3, §4, §5.
  */
 @RestController
+@org.springframework.context.annotation.Profile("!platform")
 @RequestMapping("/api/v1")
 public class EmployeeController {
 
+    private static final Pattern UUID4 = Pattern.compile(
+            "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
+    private static final String REQUEST_ID_ATTR = "vn.tmc.central.PlatformErrors.requestId";
+
+    private record CachedIdempotent(String payloadHash, int status, Object body, Instant expiresAt) {}
+
+    private static final class IdempotencyConflictException extends RuntimeException {
+        IdempotencyConflictException(String message) { super(message); }
+    }
+
     private final EmployeeManagement employeeManagement;
     private final Authentication authentication;
+    private final Map<String, CachedIdempotent> idempotencyStore = new ConcurrentHashMap<>();
 
     public EmployeeController(EmployeeManagement employeeManagement, Authentication authentication) {
         this.employeeManagement = java.util.Objects.requireNonNull(employeeManagement);
@@ -53,6 +79,14 @@ public class EmployeeController {
     public ResponseEntity<Void> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
         authentication.logout(authHeader);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/auth/reauth")
+    public ResponseEntity<ReauthResponse> reauth(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @Valid @RequestBody ReauthRequest request) {
+        ActorContext actor = authentication.getActorContext(authHeader);
+        return ResponseEntity.ok(authentication.reauth(actor, request));
     }
 
     @PostMapping("/auth/action-grants")
@@ -82,10 +116,11 @@ public class EmployeeController {
     @PostMapping("/employees")
     public ResponseEntity<EmployeeView> createEmployee(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateEmployeeCommand cmd) {
         ActorContext actor = authentication.getActorContext(authHeader);
-        EmployeeView view = employeeManagement.createEmployee(actor, cmd);
-        return ResponseEntity.status(HttpStatus.CREATED).body(view);
+        return executeIdempotent(actor, "POST:/api/v1/employees", idempotencyKey, String.valueOf(cmd),
+                HttpStatus.CREATED, () -> employeeManagement.createEmployee(actor, cmd));
     }
 
     @GetMapping("/employees/{id}")
@@ -112,10 +147,11 @@ public class EmployeeController {
     @PostMapping("/employees/imports")
     public ResponseEntity<ImportResult> importEmployees(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody ImportBatchRequest request) {
         ActorContext actor = authentication.getActorContext(authHeader);
-        ImportResult result = employeeManagement.importEmployees(actor, request.records());
-        return ResponseEntity.ok(result);
+        return executeIdempotent(actor, "POST:/api/v1/employees/imports", idempotencyKey, String.valueOf(request),
+                HttpStatus.OK, () -> employeeManagement.importEmployees(actor, request.records()));
     }
 
     // ─────────────────────────── 3. Access Policy Endpoints (§4) ──────────────
@@ -155,10 +191,11 @@ public class EmployeeController {
     @PostMapping("/departments")
     public ResponseEntity<DepartmentView> createDepartment(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateDepartmentCommand cmd) {
         ActorContext actor = authentication.getActorContext(authHeader);
-        DepartmentView view = employeeManagement.createDepartment(actor, cmd);
-        return ResponseEntity.status(HttpStatus.CREATED).body(view);
+        return executeIdempotent(actor, "POST:/api/v1/departments", idempotencyKey, String.valueOf(cmd),
+                HttpStatus.CREATED, () -> employeeManagement.createDepartment(actor, cmd));
     }
 
     @GetMapping("/departments/{id}")
@@ -195,10 +232,11 @@ public class EmployeeController {
     @PostMapping("/accounts")
     public ResponseEntity<AccountView> createAccount(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateAccountCommand cmd) {
         ActorContext actor = authentication.getActorContext(authHeader);
-        AccountView view = employeeManagement.createAccount(actor, cmd);
-        return ResponseEntity.status(HttpStatus.CREATED).body(view);
+        return executeIdempotent(actor, "POST:/api/v1/accounts", idempotencyKey, String.valueOf(cmd),
+                HttpStatus.CREATED, () -> employeeManagement.createAccount(actor, cmd));
     }
 
     @PutMapping("/accounts/{id}")
@@ -211,51 +249,107 @@ public class EmployeeController {
         return ResponseEntity.ok(view);
     }
 
+    // ─────────────────────────── Idempotency Helper (§2) ──────────────────────
+
+    @SuppressWarnings("unchecked")
+    private <T> ResponseEntity<T> executeIdempotent(ActorContext actor, String scopePath, String idempotencyKey,
+                                                    String canonicalInput, HttpStatus status, Supplier<T> action) {
+        if (idempotencyKey == null || !UUID4.matcher(idempotencyKey).matches()) {
+            throw new IllegalArgumentException("Header Idempotency-Key phải là UUIDv4 chữ thường.");
+        }
+        String cacheKey = actor.userId() + "|" + scopePath + "|" + idempotencyKey;
+        String hash = sha256(canonicalInput);
+        Instant now = Instant.now();
+        CachedIdempotent existing = idempotencyStore.get(cacheKey);
+        if (existing != null && now.isBefore(existing.expiresAt())) {
+            if (!existing.payloadHash().equals(hash)) {
+                throw new IdempotencyConflictException("Idempotency-Key đã được sử dụng với nội dung khác.");
+            }
+            return ResponseEntity.status(existing.status()).body((T) existing.body());
+        }
+        T result = action.get();
+        idempotencyStore.put(cacheKey, new CachedIdempotent(hash, status.value(), result, now.plus(48, ChronoUnit.HOURS)));
+        return ResponseEntity.status(status).body(result);
+    }
+
+    private static String sha256(String input) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(input.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
     // ─────────────────────────── Exception Handlers (§2 ApiError) ─────────────
 
     @ExceptionHandler(VersionConflictException.class)
-    public ResponseEntity<ApiError> handleVersionConflict(VersionConflictException ex) {
-        ApiError error = new ApiError("VERSION_CONFLICT", ex.getMessage(), UUID.randomUUID().toString(), false);
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    public ResponseEntity<ApiError> handleVersionConflict(VersionConflictException ex, HttpServletRequest req, HttpServletResponse res) {
+        return errorResponse(req, res, HttpStatus.CONFLICT, "VERSION_CONFLICT", ex.getMessage());
+    }
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    public ResponseEntity<ApiError> handleIdempotencyConflict(IdempotencyConflictException ex, HttpServletRequest req, HttpServletResponse res) {
+        return errorResponse(req, res, HttpStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", ex.getMessage());
     }
 
     @ExceptionHandler(ForbiddenException.class)
-    public ResponseEntity<ApiError> handleForbidden(ForbiddenException ex) {
-        ApiError error = new ApiError("FORBIDDEN", ex.getMessage(), UUID.randomUUID().toString(), false);
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    public ResponseEntity<ApiError> handleForbidden(ForbiddenException ex, HttpServletRequest req, HttpServletResponse res) {
+        return errorResponse(req, res, HttpStatus.FORBIDDEN, "FORBIDDEN", ex.getMessage());
     }
 
     @ExceptionHandler(EmployeeNotFoundException.class)
-    public ResponseEntity<ApiError> handleNotFound(EmployeeNotFoundException ex) {
-        ApiError error = new ApiError("NOT_FOUND", ex.getMessage(), UUID.randomUUID().toString(), false);
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+    public ResponseEntity<ApiError> handleNotFound(EmployeeNotFoundException ex, HttpServletRequest req, HttpServletResponse res) {
+        return errorResponse(req, res, HttpStatus.NOT_FOUND, "NOT_FOUND", ex.getMessage());
     }
 
     @ExceptionHandler(AccountLockedException.class)
-    public ResponseEntity<ApiError> handleLocked(AccountLockedException ex) {
-        ApiError error = new ApiError("ACCOUNT_LOCKED", ex.getMessage(), UUID.randomUUID().toString(), false);
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+    public ResponseEntity<ApiError> handleLocked(AccountLockedException ex, HttpServletRequest req, HttpServletResponse res) {
+        return errorResponse(req, res, HttpStatus.UNAUTHORIZED, "ACCOUNT_LOCKED", ex.getMessage());
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)
-    public ResponseEntity<ApiError> handleInvalidCredentials(InvalidCredentialsException ex) {
-        ApiError error = new ApiError("UNAUTHENTICATED", ex.getMessage(), UUID.randomUUID().toString(), false);
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
+    public ResponseEntity<ApiError> handleInvalidCredentials(InvalidCredentialsException ex, HttpServletRequest req, HttpServletResponse res) {
+        return errorResponse(req, res, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED", ex.getMessage());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ApiError> handleBadRequest(IllegalArgumentException ex) {
-        ApiError error = new ApiError("VALIDATION_ERROR", ex.getMessage(), UUID.randomUUID().toString(), false);
-        return ResponseEntity.badRequest().body(error);
+    public ResponseEntity<ApiError> handleBadRequest(IllegalArgumentException ex, HttpServletRequest req, HttpServletResponse res) {
+        return errorResponse(req, res, HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", ex.getMessage());
     }
 
     @ExceptionHandler(org.springframework.web.bind.MethodArgumentNotValidException.class)
-    public ResponseEntity<ApiError> handleValidation(org.springframework.web.bind.MethodArgumentNotValidException ex) {
+    public ResponseEntity<ApiError> handleValidation(org.springframework.web.bind.MethodArgumentNotValidException ex,
+                                                     HttpServletRequest req, HttpServletResponse res) {
         String msg = ex.getBindingResult().getFieldErrors().stream()
                 .map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
                 .findFirst()
                 .orElse("Dữ liệu đầu vào không hợp lệ.");
-        ApiError error = new ApiError("VALIDATION_ERROR", msg, UUID.randomUUID().toString(), false);
-        return ResponseEntity.badRequest().body(error);
+        return errorResponse(req, res, HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", msg);
+    }
+
+    private static ResponseEntity<ApiError> errorResponse(HttpServletRequest req, HttpServletResponse res,
+                                                          HttpStatus status, String code, String message) {
+        String requestId = resolveRequestId(req, res);
+        return ResponseEntity.status(status)
+                .header("X-Request-Id", requestId)
+                .header("Cache-Control", "no-store")
+                .body(new ApiError(code, message, requestId, false));
+    }
+
+    private static String resolveRequestId(HttpServletRequest req, HttpServletResponse res) {
+        Object attr = req != null ? req.getAttribute(REQUEST_ID_ATTR) : null;
+        if (attr != null) {
+            return attr.toString();
+        }
+        String headerOut = res != null ? res.getHeader("X-Request-Id") : null;
+        if (headerOut != null && UUID4.matcher(headerOut).matches()) {
+            return headerOut;
+        }
+        String headerIn = req != null ? req.getHeader("X-Request-Id") : null;
+        if (headerIn != null && UUID4.matcher(headerIn).matches()) {
+            return headerIn;
+        }
+        return UUID.randomUUID().toString();
     }
 }

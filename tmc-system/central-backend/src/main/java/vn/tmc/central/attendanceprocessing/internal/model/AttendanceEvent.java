@@ -75,8 +75,8 @@ public final class AttendanceEvent {
         this.correlationId = Objects.requireNonNull(correlationId, "correlationId must not be null");
         this.observedAt = Objects.requireNonNull(observedAt, "observedAt must not be null");
         this.receivedAt = Objects.requireNonNull(receivedAt, "receivedAt must not be null");
-        this.employeeId = Objects.requireNonNull(employeeId, "employeeId must not be null");
-        this.direction = Objects.requireNonNull(direction, "direction must not be null");
+        this.employeeId = employeeId;
+        this.direction = direction;
         this.source = source != null ? source : Source.ONLINE;
         this.jti = jti;
         this.kid = kid;

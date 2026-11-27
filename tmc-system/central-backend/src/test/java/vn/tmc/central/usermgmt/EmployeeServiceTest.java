@@ -149,4 +149,27 @@ class EmployeeServiceTest {
         assertThat(result.items()).hasSize(1);
         assertThat(result.items().get(0).employeeCode()).isEqualTo("EMP005");
     }
+
+    @Test
+    @DisplayName("listEmployees: SELF chỉ thấy chính mình, không gọi findAll")
+    void listEmployees_selfScope_onlyReturnsSelf() {
+        Employee selfEmp = new Employee("EMP001", "Nhân viên Tự xem", "FAC-01", "DEPT-01", true);
+        when(employeeRepository.findById("emp-001")).thenReturn(Optional.of(selfEmp));
+
+        PageResponse<EmployeeView> result = employeeService.listEmployees(selfActor, null, null, null, 0, 20);
+
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.items().get(0).employeeCode()).isEqualTo("EMP001");
+        verify(employeeRepository, never()).findAll(any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("createAccount: từ chối mật khẩu ngắn dưới 12 ký tự theo CONTRACT-V1 §4")
+    void createAccount_shortPassword_rejected() {
+        var cmd = new EmployeeManagement.CreateAccountCommand(
+                "new.user", null, List.of(Role.EMPLOYEE), List.of("FAC-01"), List.of(), "SELF", "short123"
+        );
+        assertThatThrownBy(() -> employeeService.createAccount(adminActor, cmd))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

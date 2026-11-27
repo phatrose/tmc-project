@@ -51,7 +51,7 @@ class SqliteAllowIT {
         assertEquals(EventPayload.CommandMode.QR, command.mode());
         assertEquals(EXPECTED_HASH, committed.envelope().payloadSha256());
         assertEquals("attendance.event.recorded", committed.envelope().eventType());
-        assertEquals(SCAN_ID.toString(), committed.envelope().correlationId());
+        assertEquals(SCAN_ID, committed.envelope().correlationId());
     }
 
     @Test

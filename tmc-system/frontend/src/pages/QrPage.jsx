@@ -3,22 +3,13 @@ import { encodeQr } from '../lib/qrEncoder.js';
 
 /**
  * PHỤ TRÁCH: Task 6 — QrPage: QR cá nhân (FR-UQ-02, FR-UQ-03, FR-QR-01/02).
- * HỢP ĐỒNG (CONTRACT-V1.md §3, §4):
- * - GET /api/v1/me/qr-token: Bearer phiên hợp lệ; KHÔNG nhận employeeId từ client;
- *   response {token, expiresAt}; HTTP layer phải gắn Cache-Control: no-store.
- * - QR chỉ hiển thị trên app/web sau đăng nhập; không gửi QR/JWS qua email/SMS
- *   (DECISIONS.md §5). Token phiên khác token QR; không dùng token phiên làm QR.
- * - Mỗi lần cấp có jti mới; TTL 60 giây; expiresAt để FE đếm và cấp lại đúng lúc.
- * - FE không tự ký, không tự quyết quyền mở cổng, không cache token ở storage,
- *   không in/log token; token chỉ giữ trong bộ nhớ React state.
- * PHỐI HỢP: Task 1 (phiên đăng nhập), Task 8 (api.js/session wiring, base URL).
- * Ghi chú: api.js của Task 8 chưa sẵn sàng nên trang tự gọi fetch với shape
- * ApiError {code,message,requestId,retryable}; khi Task 8 hoàn thiện HTTP client,
- * thay hàm fetchQrToken bằng request() mà không đổi UI.
+ * GET /api/v1/me/qr-token: Bearer phiên hợp lệ; Cache-Control: no-store.
+ * Token chỉ giữ trong bộ nhớ React state; không cache storage, không in/log token.
  */
 
-const API_BASE = import.meta.env?.VITE_API_BASE_URL ?? 'http://localhost:8080/api/v1';
-const REFRESH_MARGIN_SECONDS = 10; // cấp lại sớm trước khi hết hạn
+const API_BASE = import.meta.env?.VITE_API_BASE_URL ?? '/api/v1';
+const REFRESH_MARGIN_SECONDS = 10;
+const TTL_SECONDS = 60;
 
 async function fetchQrToken(accessToken) {
   const requestId = crypto.randomUUID();
@@ -37,7 +28,7 @@ async function fetchQrToken(accessToken) {
       const body = await response.json();
       if (body && typeof body.code === 'string') apiError = body;
     } catch {
-      // body không phải JSON: giữ ApiError tổng quát
+      // giữ ApiError tổng quát
     }
     const error = new Error(apiError.message || 'Không lấy được QR');
     error.apiError = apiError;
@@ -79,7 +70,7 @@ function QrCanvas({ token }) {
       width="240"
       height="240"
       viewBox={`0 0 ${dimension} ${dimension}`}
-      style={{ background: '#ffffff', border: '1px solid #dce2ea', borderRadius: 8, shapeRendering: 'crispEdges' }}
+      style={{ background: '#ffffff', shapeRendering: 'crispEdges' }}
     >
       <rect width={dimension} height={dimension} fill="#ffffff" />
       <path d={paths.join('')} fill="#000000" />
@@ -107,7 +98,6 @@ export default function QrPage({ session }) {
     }
   }, [accessToken]);
 
-  // Bỏ token khỏi bộ nhớ khi rời trang; dừng mọi timer/abort.
   useEffect(() => {
     if (!accessToken) return undefined;
     load();
@@ -125,8 +115,8 @@ export default function QrPage({ session }) {
   }, [accessToken, load]);
 
   const secondsLeft = state.expiresAt ? Math.max(0, Math.round((state.expiresAt.getTime() - now) / 1000)) : 0;
+  const progressPct = Math.min(100, Math.max(0, (secondsLeft / TTL_SECONDS) * 100));
 
-  // Hết hạn hoặc sắp hết hạn (còn <= REFRESH_MARGIN_SECONDS) thì tự cấp lại.
   useEffect(() => {
     if (state.status !== 'ready' && state.status !== 'refreshing') return;
     if (secondsLeft <= REFRESH_MARGIN_SECONDS) load();
@@ -134,7 +124,8 @@ export default function QrPage({ session }) {
 
   if (!accessToken) {
     return (
-      <section>
+      <section className="personal-qr-card">
+        <span className="module-label">Thẻ chấm công điện tử</span>
         <h1>QR cá nhân</h1>
         <p className="status">Cần đăng nhập để hiển thị QR động. QR không gửi qua email/SMS.</p>
       </section>
@@ -159,21 +150,41 @@ export default function QrPage({ session }) {
   }
 
   return (
-    <section>
+    <section className="personal-qr-card">
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
+        <span className="tmc-badge tmc-badge--accent">ES256 Dynamic QR</span>
+        <span className={`tmc-badge ${state.status === 'ready' ? 'tmc-badge--success' : 'tmc-badge--warning'}`}>
+          {state.status === 'ready' ? 'Đang hoạt động' : state.status === 'refreshing' ? 'Đang làm mới…' : 'Đang tải…'}
+        </span>
+      </div>
+
       <h1>QR cá nhân</h1>
-      <p>QR động 60 giây để quét tại cổng. Mỗi lần cấp chỉ dùng được một lần, không chia sẻ ảnh chụp.</p>
+      <p>Mã QR động có hiệu lực 60 giây, chỉ dùng một lần tại cổng. Không chia sẻ ảnh chụp màn hình.</p>
+
       {state.token && (state.status === 'ready' || state.status === 'refreshing') && (
         <>
-          <QrCanvas token={state.token} />
-          <p>
+          <div className="qr-frame">
+            <QrCanvas token={state.token} />
+          </div>
+          <div className="qr-progress-track" aria-hidden="true">
+            <div className="qr-progress-bar" style={{ width: `${progressPct}%` }} />
+          </div>
+          <p className="qr-meta">
             Hết hạn lúc <strong>{expiresAtText}</strong>{' '}
             {state.status === 'refreshing' ? '— đang cấp lại…' : `— còn ${secondsLeft} giây`}
           </p>
         </>
       )}
-      {state.status === 'loading' && <p className="status">Đang lấy QR…</p>}
-      {notice && <p role="alert" className="status">{notice}</p>}
-      <button type="button" onClick={load} disabled={state.status === 'loading' || state.status === 'refreshing'}>
+
+      {state.status === 'loading' && <p className="status" style={{ margin: '28px 0' }}>Đang lấy mã QR…</p>}
+      {notice && <div role="alert" className="notice error" style={{ marginTop: 18 }}>{notice}</div>}
+
+      <button
+        type="button"
+        className="tmc-btn-primary"
+        onClick={load}
+        disabled={state.status === 'loading' || state.status === 'refreshing'}
+      >
         Cấp lại QR ngay
       </button>
     </section>

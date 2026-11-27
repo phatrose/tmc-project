@@ -76,7 +76,7 @@ final class SqliteBatches {
                 VALUES (?, ?, 'READY', ?, ?, ?)
                 """)) {
             statement.setString(1, batchId.toString());
-            statement.setString(2, selected.events().getFirst().edgeId());
+            statement.setString(2, selected.events().getFirst().edgeId().toString());
             statement.setInt(3, selected.events().size());
             statement.setString(4, CanonicalPayload.sha256(selectedBody));
             statement.setLong(5, now.toEpochMilli());
@@ -163,7 +163,7 @@ final class SqliteBatches {
                 }
             }
         }
-        advanceCursor(db, batch.events().getFirst().edgeId(), ack.lastContiguousSequenceNo());
+        advanceCursor(db, batch.events().getFirst().edgeId().toString(), ack.lastContiguousSequenceNo());
         try (var statement = db.prepareStatement("UPDATE local_sync_batches SET state = 'COMPLETED' WHERE batch_id = ?")) {
             statement.setString(1, expectedBatchId.toString());
             if (statement.executeUpdate() != 1) {

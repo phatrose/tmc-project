@@ -12,6 +12,7 @@ import vn.tmc.central.attendanceprocessing.api.AttendanceAdjustmentView;
 import vn.tmc.central.attendanceprocessing.internal.model.AdjustmentHistory;
 import vn.tmc.central.attendanceprocessing.internal.model.AttendanceAdjustment;
 import vn.tmc.central.attendanceprocessing.internal.model.DailyAttendanceRecord;
+import vn.tmc.central.attendanceprocessing.internal.model.ShiftDefinition;
 import vn.tmc.central.attendanceprocessing.internal.repository.AttendanceAdjustmentRepository;
 import vn.tmc.central.attendanceprocessing.internal.repository.DailyAttendanceRepository;
 import vn.tmc.central.usermgmt.api.ActorContext;
@@ -22,6 +23,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -29,14 +31,16 @@ import java.util.UUID;
 /**
  * PHỤ TRÁCH: Task 3.
  * VAI TRÒ: Service xử lý quy trình điều chỉnh công theo CONTRACT-V1.md §9 & §10.
- * 
+ *
  * QUY TẮC BẢO MẬT & BẤT BIẾN:
  * - Tách quyền độc lập: decidedBy != createdBy (người tạo không được tự duyệt).
- * - Auditor cấm duyệt: Role.AUDITOR bị từ chối phê duyệt/từ chối.
+ * - Auditor cấm duyệt hoặc tạo điều chỉnh: Role.AUDITOR bị từ chối.
  * - Version optimistic locking: sai version trả lỗi xung đột trạng thái (HTTP 409).
  * - Bất biến: Tuyệt đối không UPDATE/DELETE bảng attendance_events gốc.
  */
 public final class AttendanceAdjustmentService implements AttendanceAdjustmentPort {
+    private static final ZoneId DEFAULT_FACTORY_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
+
     private final AttendanceAdjustmentRepository adjustmentRepository;
     private final DailyAttendanceRepository dailyRepository;
 
@@ -53,14 +57,23 @@ public final class AttendanceAdjustmentService implements AttendanceAdjustmentPo
         Objects.requireNonNull(context, "context must not be null");
         Objects.requireNonNull(request, "request must not be null");
 
-        UUID employeeId = context.employeeId() != null ? context.employeeId() : context.userId();
+        if (context.isAuditor()) {
+            throw new SecurityException("Auditor là vai trò chỉ đọc; cấm gửi yêu cầu điều chỉnh công");
+        }
+        if (request.proposedDirection() != null
+                && !"IN".equals(request.proposedDirection())
+                && !"OUT".equals(request.proposedDirection())) {
+            throw new IllegalArgumentException("proposedDirection phải là IN, OUT hoặc null");
+        }
+
+        UUID employeeId = UUID.fromString(context.employeeId() != null ? context.employeeId() : context.userId());
         UUID adjustmentId = UUID.randomUUID();
 
         AttendanceAdjustment adjustment = new AttendanceAdjustment(
                 adjustmentId,
                 request.eventId(),
                 employeeId,
-                context.userId(),
+                UUID.fromString(context.userId()),
                 request.proposedOccurredAt(),
                 request.proposedDirection(),
                 request.reason(),
@@ -83,7 +96,7 @@ public final class AttendanceAdjustmentService implements AttendanceAdjustmentPo
         }
 
         // RÀNG BUỘC 2: Kiểm tra quyền attendance.approve
-        if (!context.hasPermission("attendance.approve") && !context.hasRole(Role.HR) && !context.hasRole(Role.SUPERVISOR)) {
+        if (!context.hasPermission("attendance.approve")) {
             throw new SecurityException("Yêu cầu quyền attendance.approve để xử lý điều chỉnh công");
         }
 
@@ -91,7 +104,7 @@ public final class AttendanceAdjustmentService implements AttendanceAdjustmentPo
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy yêu cầu điều chỉnh: " + adjustmentId));
 
         // RÀNG BUỘC 3: Người tạo không được tự duyệt yêu cầu của mình (CONTRACT-V1 §9)
-        if (context.userId().equals(adjustment.getCreatedBy())) {
+        if (UUID.fromString(context.userId()).equals(adjustment.getCreatedBy())) {
             throw new IllegalStateException("Người tạo không được tự phê duyệt yêu cầu điều chỉnh của chính mình");
         }
 
@@ -108,16 +121,13 @@ public final class AttendanceAdjustmentService implements AttendanceAdjustmentPo
         Instant now = Instant.now();
         boolean approved = "APPROVE".equalsIgnoreCase(decision.decision());
         adjustment.setState(approved ? "APPROVED" : "REJECTED");
-        adjustment.setDecidedBy(context.userId());
+        adjustment.setDecidedBy(UUID.fromString(context.userId()));
         adjustment.setDecidedAt(now);
         adjustment.setDecisionReason(decision.reason());
         adjustment.incrementVersion();
 
         if (approved) {
-            // Cập nhật bản ghi dẫn xuất daily_attendance_records (KHÔNG SỬA EVENT GỐC!)
-            LocalDate workDate = adjustment.getProposedOccurredAt() != null
-                    ? adjustment.getProposedOccurredAt().atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toLocalDate()
-                    : LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh"));
+            LocalDate workDate = resolveAdjustedWorkDate(adjustment);
 
             dailyRepository.findByEmployeeIdAndWorkDate(adjustment.getEmployeeId(), workDate)
                     .ifPresent(daily -> {
@@ -140,7 +150,6 @@ public final class AttendanceAdjustmentService implements AttendanceAdjustmentPo
                     });
         }
 
-        // Lưu lịch sử điều chỉnh
         AdjustmentHistory history = new AdjustmentHistory(
                 "HIST-" + UUID.randomUUID(),
                 adjustment.getId().toString(),
@@ -156,11 +165,38 @@ public final class AttendanceAdjustmentService implements AttendanceAdjustmentPo
         return adjustment.toContractDto();
     }
 
+    private static LocalDate resolveAdjustedWorkDate(AttendanceAdjustment adjustment) {
+        if (adjustment.getProposedOccurredAt() == null) {
+            return LocalDate.now(DEFAULT_FACTORY_ZONE);
+        }
+        ZonedDateTime zdt = adjustment.getProposedOccurredAt().atZone(DEFAULT_FACTORY_ZONE);
+        if (adjustment.getProposedDirection() != null) {
+            boolean isCheckIn = "IN".equalsIgnoreCase(adjustment.getProposedDirection());
+            return ShiftDefinition.determineShiftAndWorkDate(zdt, isCheckIn).workDate();
+        }
+        return zdt.toLocalDate();
+    }
+
     @Override
     public Page<Adjustment> queryAdjustments(ActorContext context, UUID employeeId, String state, int page, int size) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new IllegalArgumentException("page phải >= 0 và size phải từ 1 đến 100.");
+        }
+        UUID effectiveEmployeeId = employeeId;
+        if (context != null && ActorContext.SCOPE_SELF.equals(context.scope())) {
+            if (context.employeeId() == null) {
+                return Page.empty(page, size);
+            }
+            UUID selfId = UUID.fromString(context.employeeId());
+            if (employeeId != null && !selfId.equals(employeeId)) {
+                throw new SecurityException("Tài khoản SELF chỉ được xem yêu cầu điều chỉnh của chính mình.");
+            }
+            effectiveEmployeeId = selfId;
+        }
+
         List<AttendanceAdjustment> list;
-        if (employeeId != null) {
-            list = adjustmentRepository.findByEmployeeId(employeeId);
+        if (effectiveEmployeeId != null) {
+            list = adjustmentRepository.findByEmployeeId(effectiveEmployeeId);
             if (state != null) {
                 list = list.stream().filter(a -> a.getState().equalsIgnoreCase(state)).toList();
             }
@@ -179,26 +215,21 @@ public final class AttendanceAdjustmentService implements AttendanceAdjustmentPo
         return new Page<>(pagedItems, page, size, list.size());
     }
 
-    // --- Phương thức tương thích ngược với sườn cũ ---
-
-    public void requestAdjustment(String eventId, String operatorId, String reason) {
-        if (reason == null || reason.isBlank()) {
-            throw new IllegalArgumentException("reason is required");
-        }
-    }
-
     @Override
     public AttendanceAdjustmentView requestAdjustment(AdjustmentRequestCommand command) {
-        UUID empId = UUID.nameUUIDFromBytes(command.employeeId().getBytes());
+        Objects.requireNonNull(command, "command must not be null");
         UUID adjId = UUID.randomUUID();
+        UUID empUuid = parseUuidSafe(command.employeeId());
+        UUID creatorUuid = parseUuidSafe(command.requestedBy());
+
         AttendanceAdjustment adj = new AttendanceAdjustment(
                 adjId,
                 null,
-                empId,
-                UUID.nameUUIDFromBytes(command.requestedBy().getBytes()),
-                command.requestedTime() != null ? command.requestedTime() : Instant.now(),
-                "IN",
-                command.reason().length() < 10 ? command.reason() + " (chi tiết bổ sung)" : command.reason(),
+                empUuid,
+                creatorUuid,
+                command.requestedTime(),
+                command.adjustmentType() != null ? command.adjustmentType().name() : "MODIFY",
+                command.reason(),
                 Instant.now()
         );
         adjustmentRepository.save(adj);
@@ -213,53 +244,78 @@ public final class AttendanceAdjustmentService implements AttendanceAdjustmentPo
                 command.reason(),
                 AdjustmentStatus.PENDING,
                 command.requestedBy(),
-                Instant.now(),
-                null, null, null
+                adj.getCreatedAt(),
+                null,
+                null,
+                null
         );
     }
 
     @Override
     public AttendanceAdjustmentView reviewAdjustment(AdjustmentReviewCommand command) {
-        UUID adjId = UUID.fromString(command.adjustmentId().startsWith("ADJ-")
-                ? UUID.nameUUIDFromBytes(command.adjustmentId().getBytes()).toString()
-                : command.adjustmentId());
+        Objects.requireNonNull(command, "command must not be null");
+        UUID adjId = UUID.fromString(command.adjustmentId());
+        AttendanceAdjustment adj = adjustmentRepository.findAdjustmentById(adjId)
+                .orElseThrow(() -> new IllegalArgumentException("Adjustment not found: " + command.adjustmentId()));
 
-        AttendanceAdjustment adjustment = adjustmentRepository.findAdjustmentById(adjId)
-                .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy: " + command.adjustmentId()));
-
-        if (command.reviewerRole() == Role.AUDITOR) {
-            throw new SecurityException("Auditor cấm phê duyệt điều chỉnh");
-        }
-        if (adjustment.getCreatedBy().toString().equalsIgnoreCase(command.reviewerId()) ||
-            command.reviewerId().equalsIgnoreCase("SUP001") && adjustment.getCreatedBy().equals(UUID.nameUUIDFromBytes("SUP001".getBytes()))) {
-            throw new IllegalStateException("Người tạo không được tự phê duyệt");
+        UUID reviewerUuid = parseUuidSafe(command.reviewerId());
+        if (reviewerUuid.equals(adj.getCreatedBy())) {
+            throw new IllegalStateException("Người tạo không được tự phê duyệt yêu cầu của chính mình");
         }
 
-        adjustment.setState(command.approved() ? "APPROVED" : "REJECTED");
-        adjustment.setDecidedBy(UUID.nameUUIDFromBytes(command.reviewerId().getBytes()));
-        adjustment.setDecidedAt(Instant.now());
-        adjustment.setDecisionReason(command.reviewNote());
-        adjustmentRepository.save(adjustment);
+        adj.setState(command.approved() ? "APPROVED" : "REJECTED");
+        adj.setDecidedBy(reviewerUuid);
+        adj.setDecidedAt(Instant.now());
+        adj.setDecisionReason(command.reviewNote());
+        adj.incrementVersion();
+        adjustmentRepository.save(adj);
 
         return new AttendanceAdjustmentView(
-                command.adjustmentId(),
-                "EMP001",
-                LocalDate.now(),
-                AdjustmentType.EXCUSE_LATE,
-                Instant.now(),
-                8.0,
-                adjustment.getReason(),
+                adj.getId().toString(),
+                adj.getEmployeeId().toString(),
+                LocalDate.now(DEFAULT_FACTORY_ZONE),
+                AdjustmentType.MODIFY_HOURS,
+                adj.getProposedOccurredAt(),
+                null,
+                adj.getReason(),
                 command.approved() ? AdjustmentStatus.APPROVED : AdjustmentStatus.REJECTED,
-                "EMP001",
-                Instant.now(),
+                adj.getCreatedBy().toString(),
+                adj.getCreatedAt(),
                 command.reviewerId(),
-                Instant.now(),
+                adj.getDecidedAt(),
                 command.reviewNote()
         );
     }
 
     @Override
     public List<AttendanceAdjustmentView> queryAdjustments(String employeeId, AdjustmentStatus status) {
-        return List.of();
+        UUID empUuid = parseUuidSafe(employeeId);
+        return adjustmentRepository.findByEmployeeId(empUuid).stream()
+                .filter(a -> status == null || a.getState().equalsIgnoreCase(status.name()))
+                .map(a -> new AttendanceAdjustmentView(
+                        a.getId().toString(),
+                        a.getEmployeeId().toString(),
+                        LocalDate.now(DEFAULT_FACTORY_ZONE),
+                        AdjustmentType.MODIFY_HOURS,
+                        a.getProposedOccurredAt(),
+                        null,
+                        a.getReason(),
+                        AdjustmentStatus.valueOf(a.getState()),
+                        a.getCreatedBy().toString(),
+                        a.getCreatedAt(),
+                        a.getDecidedBy() != null ? a.getDecidedBy().toString() : null,
+                        a.getDecidedAt(),
+                        a.getDecisionReason()
+                ))
+                .toList();
+    }
+
+    private static UUID parseUuidSafe(String val) {
+        if (val == null) return UUID.randomUUID();
+        try {
+            return UUID.fromString(val);
+        } catch (IllegalArgumentException e) {
+            return UUID.nameUUIDFromBytes(val.getBytes());
+        }
     }
 }

@@ -31,11 +31,11 @@ final class SqliteEvents {
             statement.setString(1, eventId.toString());
             statement.setString(2, envelope.eventType());
             statement.setInt(3, envelope.schemaVersion());
-            statement.setString(4, envelope.edgeId());
-            statement.setString(5, envelope.gateId());
-            statement.setString(6, envelope.factoryId());
+            statement.setString(4, envelope.edgeId().toString());
+            statement.setString(5, envelope.gateId().toString());
+            statement.setString(6, envelope.factoryId().toString());
             statement.setLong(7, envelope.sequenceNo());
-            statement.setString(8, envelope.correlationId());
+            statement.setString(8, envelope.correlationId().toString());
             statement.setLong(9, envelope.occurredAt().toEpochMilli());
             statement.setString(10, envelope.payloadSha256());
             statement.setString(11, envelope.payload());
@@ -77,7 +77,7 @@ final class SqliteEvents {
                 UPDATE edge_runtime_state SET last_sequence_no = ? WHERE edge_id = ? AND last_sequence_no = ?
                 """)) {
             statement.setLong(1, envelope.sequenceNo());
-            statement.setString(2, envelope.edgeId());
+            statement.setString(2, envelope.edgeId().toString());
             statement.setLong(3, envelope.sequenceNo() - 1);
             if (statement.executeUpdate() != 1) {
                 throw new SQLException("Edge sequence state was not advanced");

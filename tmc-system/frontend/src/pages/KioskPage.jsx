@@ -62,7 +62,7 @@ export default function KioskPage() {
 
   const tone = view?.tone || 'idle';
   return <section aria-labelledby="kiosk-title">
-    <h1 id="kiosk-title">Quét tại cổng</h1>
+    <div className="module-heading"><span className="module-label">TRẠM CHẤM CÔNG</span><h1 id="kiosk-title">Quét tại cổng</h1><p>Đưa mã QR vào đầu đọc. Kết quả xác nhận sẽ hiển thị ngay bên dưới.</p></div>
     {!gateValid && <div className="gs-panel">
       <div className="gs-field">
         <label htmlFor="gate-id">Mã cổng của kiosk này (UUID)</label>

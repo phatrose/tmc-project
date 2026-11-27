@@ -106,6 +106,7 @@ class SqliteOverridesIT {
     @ParameterizedTest
     @ValueSource(strings = {"operator", "reason", "blank", "short", "long", "jti", "kid", "issuedAt", "kind"})
     void manualAllow_rejectsInvalidOperatorReasonAndCredentialFields(String invalid) throws Exception {
+        assertThrows(IllegalArgumentException.class, () -> {
         var payload = new AttendancePayload(EMPLOYEE_ID.toString(), AttendancePayload.Direction.IN,
                 AttendancePayload.Source.MANUAL, invalid.equals("jti") ? JTI.toString() : null,
                 invalid.equals("kid") ? "unexpected" : null, invalid.equals("issuedAt") ? OCCURRED_AT : null,
@@ -118,8 +119,9 @@ class SqliteOverridesIT {
                     default -> REASON;
                 });
         var grant = invalid.equals("kind") ? qrReservation(JTI) : manualGrant(JTI, REASON);
-        assertThrows(IllegalArgumentException.class, () -> store.reserveAndAppend(SCAN_ID,
-                new EventDraft(EDGE_ID, GATE_ID, FACTORY_ID, SCAN_ID, OCCURRED_AT, new EventPayload.Attendance(payload)), grant));
+        store.reserveAndAppend(SCAN_ID,
+                new EventDraft(EDGE_ID, GATE_ID, FACTORY_ID, SCAN_ID, OCCURRED_AT, new EventPayload.Attendance(payload)), grant);
+        });
         assertCounts(0, 0);
     }
 

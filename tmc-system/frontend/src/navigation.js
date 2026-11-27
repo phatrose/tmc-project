@@ -11,9 +11,12 @@ export const routes = [
   { id: 'login', title: 'Đăng nhập', task: 1, public: true },
 ];
 export function canAccess(route, session) {
+  if (!route) return false;
   if (route.public) return true;
-  if (!session || Date.parse(session.expiresAt) <= Date.now()) return false;
+  const expiry = Date.parse(session?.expiresAt);
+  if (!Number.isFinite(expiry) || expiry <= Date.now()) return false;
   const actor = session.actor;
+  if (!Array.isArray(actor?.roles) || !Array.isArray(actor?.permissions)) return false;
   if (route.mutation && actor.roles.includes('AUDITOR')) return false;
   if (route.employee) return Boolean(actor.employeeId) && !actor.roles.includes('AUDITOR');
   if (route.permission) return actor.permissions.includes(route.permission);

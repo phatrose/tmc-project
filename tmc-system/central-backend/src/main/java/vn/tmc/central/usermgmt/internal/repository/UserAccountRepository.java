@@ -15,7 +15,11 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, String
 
     Optional<UserAccount> findByUsername(String username);
 
+    Optional<UserAccount> findByUsernameIgnoreCase(String username);
+
     Optional<UserAccount> findByEmployeeId(String employeeId);
 
     boolean existsByUsername(String username);
+
+    boolean existsByUsernameIgnoreCase(String username);
 }

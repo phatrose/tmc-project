@@ -23,6 +23,10 @@ public class ApiExceptionHandler {
     ResponseEntity<ApiError> unauthenticated(HttpServletRequest req) {
         return error(req, 401, "UNAUTHENTICATED", "Authentication is required.", false);
     }
+    @ExceptionHandler(vn.tmc.central.qrsecurity.api.QrSecurityException.class)
+    ResponseEntity<ApiError> qr(vn.tmc.central.qrsecurity.api.QrSecurityException ex,HttpServletRequest req){
+        return error(req,ex.httpStatus(),ex.code(),ex.getMessage(),ex.retryable());
+    }
     @ExceptionHandler(ApiException.class)
     ResponseEntity<ApiError> declared(ApiException ex, HttpServletRequest req) {
         return error(req, ex.status(), ex.code(), ex.getMessage(), ex.retryable());

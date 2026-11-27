@@ -36,6 +36,7 @@ public class PlatformConfiguration {
         return username -> { throw new UsernameNotFoundException("Authentication not configured"); };
     }
     @Bean
+    @org.springframework.context.annotation.Profile("!integration-preview")
     @ConditionalOnMissingBean(SecurityFilterChain.class)
     SecurityFilterChain platformSecurity(HttpSecurity http, ObjectMapper mapper) throws Exception {
         http.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
