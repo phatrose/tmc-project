@@ -151,7 +151,13 @@ export default function App() {
 
       <aside className="sidebar">
         <a className="brand" href="#/home">
-          <span className="brand-mark">TMC</span>
+          <img
+            src="/brand/tmc-mark.svg"
+            alt=""
+            className="brand-logo-mark"
+            width="36"
+            height="36"
+          />
           <span className="brand-text">
             <strong>TMC System</strong>
             <span>Kiểm soát cổng &amp; Chấm công</span>

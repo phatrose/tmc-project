@@ -48,8 +48,13 @@ export default function LoginPage({ onLoginSuccess }) {
       <div className="login-intro">
         <div className="login-intro-top">
           <div className="login-brand-row">
-            <span className="login-mark">TMC</span>
-            <span className="login-brand-name">TMC Access Control</span>
+            <img
+              src="/brand/tmc-logo.svg"
+              alt="TMC System"
+              className="login-logo-full"
+              width="212"
+              height="40"
+            />
           </div>
           <h1>Kiểm soát ra vào &amp; chấm công bằng QR</h1>
           <p>

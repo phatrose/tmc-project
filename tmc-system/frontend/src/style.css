@@ -151,6 +151,19 @@ table {
   margin-bottom: 16px;
 }
 
+.brand-logo-mark {
+  width: 36px;
+  height: 36px;
+  display: block;
+  flex-shrink: 0;
+}
+
+.login-logo-full {
+  height: 40px;
+  width: auto;
+  display: block;
+}
+
 .brand-mark {
   width: 36px;
   height: 36px;
