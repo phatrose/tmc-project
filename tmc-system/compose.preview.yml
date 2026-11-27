@@ -3,4 +3,4 @@ services:
   central:
     environment:
       SPRING_PROFILES_ACTIVE: integration-preview
-      TMC_PREVIEW_PASSWORD: ${TMC_PREVIEW_PASSWORD:?Set preview password}
+      TMC_PREVIEW_PASSWORD: ${TMC_PREVIEW_PASSWORD:-123456}
