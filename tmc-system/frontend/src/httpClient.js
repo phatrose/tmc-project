@@ -8,7 +8,8 @@ export class HttpError extends Error {
   }
 }
 export function createHttpClient({ baseUrl = '/api/v1', fetchImpl = globalThis.fetch,
-  getToken = () => null, onUnauthorized = () => {}, newId = () => crypto.randomUUID() } = {}) {
+  getToken = () => null, onUnauthorized = () => {}, newId = () => crypto.randomUUID(),
+  credentials = 'omit' } = {}) {
   const base = baseUrl.replace(/\/+$/, '');
   if (!base || (!base.startsWith('/') && !/^https?:\/\//.test(base))) throw new TypeError('Invalid API base URL');
   return async function request(path, { method = 'GET', body, headers: suppliedHeaders, signal,
@@ -47,10 +48,12 @@ export function createHttpClient({ baseUrl = '/api/v1', fetchImpl = globalThis.f
       const response = await fetchImpl(base + path, {
         method: method.toUpperCase(), headers, signal: controller.signal,
         body: payload,
-        credentials: 'omit', redirect: 'error', cache: 'no-store',
+        credentials, redirect: 'error', cache: 'no-store',
       });
       // A late 401 from an old session must not erase a newly logged-in session.
-      if (response.status === 401 && token && getToken() === token) onUnauthorized();
+      if (response.status === 401 && ((token && getToken() === token) || (auth && credentials === 'same-origin' && !token))) {
+        onUnauthorized();
+      }
       const responseId = response.headers.get('X-Request-Id') || requestId;
       const text = await response.text();
       let data;

@@ -107,11 +107,15 @@ class AuthenticationServiceTest {
         Session session = authenticationService.authenticate(new LoginRequest("guard1", "pass123"));
 
         when(userAccountRepository.findById(guard.getId())).thenReturn(Optional.of(guard));
-        when(tokenIssuerPort.issueToken(eq(guard.getId()), eq(Role.GUARD), anyList()))
-                .thenReturn("action.grant.jwt");
+        when(tokenIssuerPort.issueActionGrant(any())).thenReturn("action.grant.jwt");
 
         ActionGrantRequest request = new ActionGrantRequest(
-                "pass123", "MANUAL", "edge-01", "gate-01", "emp-01", "Mất thẻ nhân viên cần vào khẩn cấp"
+                "pass123",
+                "MANUAL",
+                "00000000-0000-4000-8000-0000000000e1",
+                "00000000-0000-4000-8000-000000000011",
+                "00000000-0000-4000-8000-000000000101",
+                "Mất thẻ nhân viên cần vào khẩn cấp"
         );
 
         ActionGrantResponse response = authenticationService.issueActionGrant(session.actor(), request);

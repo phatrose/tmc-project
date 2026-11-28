@@ -8,6 +8,7 @@ import java.util.*;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import vn.tmc.central.qrsecurity.api.QrKeySetQuery;
 import vn.tmc.central.qrsecurity.api.QrRevocationQuery;
@@ -17,6 +18,7 @@ import vn.tmc.central.systemadmin.api.GateView;
 import vn.tmc.central.usermgmt.api.*;
 import vn.tmc.contracts.AttendancePayload;
 import vn.tmc.contracts.BootstrapResponse;
+import vn.tmc.contracts.DeviceContext;
 import vn.tmc.contracts.QrKeySet;
 import vn.tmc.contracts.QrKeySetEntry;
 import vn.tmc.contracts.RevocationChange;
@@ -77,10 +79,9 @@ public final class PreviewEdgeGatewayController {
 
     @GetMapping("/edge/bootstrap")
     public ResponseEntity<BootstrapResponse> bootstrap(
-            @RequestParam(value = "afterRevision", defaultValue = "0") long afterRevision,
-            @RequestHeader(value = "X-Edge-Id", required = false) String edgeIdHeader,
-            @RequestHeader(value = "X-Factory-Id", required = false) String factoryIdHeader
+            @RequestParam(value = "afterRevision", defaultValue = "0") long afterRevision
     ) {
+        DeviceContext mtlsDevice = requireMtlsDeviceContext();
         QrKeySet ks = keySetQuery.keySet();
         long revision = Math.max(1L, ks.version() + revocationQuery.revision());
         if (afterRevision >= revision) {
@@ -89,8 +90,8 @@ public final class PreviewEdgeGatewayController {
                     .build();
         }
 
-        UUID factoryId = toUuid(factoryIdHeader != null ? factoryIdHeader : "00000000-0000-4000-8000-000000000023");
-        UUID edgeId = toUuid(edgeIdHeader != null ? edgeIdHeader : "00000000-0000-4000-8000-0000000000e1");
+        UUID factoryId = mtlsDevice.factoryId();
+        UUID edgeId = mtlsDevice.edgeId();
         Instant now = clock.instant();
 
         List<BootstrapResponse.SigningKey> signingKeys = ks.keys().stream()
@@ -155,18 +156,26 @@ public final class PreviewEdgeGatewayController {
     @PostMapping("/edge/heartbeat")
     public ResponseEntity<Map<String, Object>> heartbeat(
             @RequestBody(required = false) HeartbeatRequest body,
-            @RequestHeader(value = "X-Edge-Id", required = false) String edgeIdHeader,
-            @RequestHeader(value = "X-Factory-Id", required = false) String factoryIdHeader,
             HttpServletRequest request
     ) {
-        String edgeId = (edgeIdHeader != null && !edgeIdHeader.isBlank()) ? edgeIdHeader.trim() : "EDGE-BD-01";
-        String factoryId = (factoryIdHeader != null && !factoryIdHeader.isBlank()) ? factoryIdHeader.trim() : "FACTORY-BD";
+        DeviceContext mtlsDevice = requireMtlsDeviceContext();
+        String edgeId = mtlsDevice.edgeId().toString();
+        String factoryId = mtlsDevice.factoryId().toString();
         administration.recordDeviceHeartbeat(edgeId, "EDGE_NODE", factoryId, request.getRemoteAddr());
         return ResponseEntity.ok(Map.of(
                 "status", "ACKNOWLEDGED",
                 "edgeId", edgeId,
+                "factoryId", factoryId,
                 "receivedAt", clock.instant().toString()
         ));
+    }
+
+    private static DeviceContext requireMtlsDeviceContext() {
+        var auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof DeviceContext dc) {
+            return dc;
+        }
+        throw new ApiException(403, "DEVICE_BINDING_MISMATCH", "mTLS client certificate is required for Edge endpoints.", false);
     }
 
     @GetMapping("/qr/keys/refresh")

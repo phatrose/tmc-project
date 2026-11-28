@@ -87,6 +87,7 @@ public final class DailyAttendanceRecord {
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public int getVersion() { return version; }
+    public void setVersion(int version) { this.version = version; }
     public void incrementVersion() { this.version++; }
 
     public DailyAttendance toContractDto() {

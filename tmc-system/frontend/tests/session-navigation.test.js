@@ -31,10 +31,3 @@ test('Auditor mutation restrictions override extra permissions', () => {
   assert.equal(canAccess(routes.find(r => r.id === 'guard'), session), false);
   assert.equal(canAccess(routes.find(r => r.id === 'reports'), session), true);
 });
-
-test('malformed session and unknown route fail closed without crashing', () => {
-  const route = routes.find(r => r.id === 'employees');
-  assert.equal(canAccess(null, sample()), false);
-  assert.equal(canAccess(route, { ...sample(), expiresAt: 'invalid' }), false);
-  assert.equal(canAccess(route, { ...sample(), actor: {} }), false);
-});

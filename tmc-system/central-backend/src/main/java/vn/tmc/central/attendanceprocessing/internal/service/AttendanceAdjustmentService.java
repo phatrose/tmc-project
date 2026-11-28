@@ -27,6 +27,7 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * PHỤ TRÁCH: Task 3.
@@ -43,13 +44,23 @@ public final class AttendanceAdjustmentService implements AttendanceAdjustmentPo
 
     private final AttendanceAdjustmentRepository adjustmentRepository;
     private final DailyAttendanceRepository dailyRepository;
+    private final Function<UUID, String> employeeFactoryLookup;
+
+    public AttendanceAdjustmentService(
+            AttendanceAdjustmentRepository adjustmentRepository,
+            DailyAttendanceRepository dailyRepository,
+            Function<UUID, String> employeeFactoryLookup
+    ) {
+        this.adjustmentRepository = Objects.requireNonNull(adjustmentRepository, "adjustmentRepository must not be null");
+        this.dailyRepository = Objects.requireNonNull(dailyRepository, "dailyRepository must not be null");
+        this.employeeFactoryLookup = employeeFactoryLookup;
+    }
 
     public AttendanceAdjustmentService(
             AttendanceAdjustmentRepository adjustmentRepository,
             DailyAttendanceRepository dailyRepository
     ) {
-        this.adjustmentRepository = Objects.requireNonNull(adjustmentRepository, "adjustmentRepository must not be null");
-        this.dailyRepository = Objects.requireNonNull(dailyRepository, "dailyRepository must not be null");
+        this(adjustmentRepository, dailyRepository, null);
     }
 
     @Override
@@ -106,6 +117,19 @@ public final class AttendanceAdjustmentService implements AttendanceAdjustmentPo
         // RÀNG BUỘC 3: Người tạo không được tự duyệt yêu cầu của mình (CONTRACT-V1 §9)
         if (UUID.fromString(context.userId()).equals(adjustment.getCreatedBy())) {
             throw new IllegalStateException("Người tạo không được tự phê duyệt yêu cầu điều chỉnh của chính mình");
+        }
+
+        // RÀNG BUỘC 3b: Kiểm tra phạm vi nhà máy của nhân viên đích (SCOPE-10, CONTRACT-V1 §3/§9)
+        if (!ActorContext.SCOPE_GLOBAL.equals(context.scope())) {
+            if (context.factoryIds().isEmpty()) {
+                throw new SecurityException("Tài khoản chưa được gán phạm vi nhà máy để duyệt điều chỉnh công.");
+            }
+            if (employeeFactoryLookup != null) {
+                String targetFactoryId = employeeFactoryLookup.apply(adjustment.getEmployeeId());
+                if (targetFactoryId == null || !context.factoryIds().contains(targetFactoryId)) {
+                    throw new SecurityException("Không có quyền phê duyệt điều chỉnh công cho nhân viên ngoài nhà máy được gán.");
+                }
+            }
         }
 
         // RÀNG BUỘC 4: Chỉ quyết định từ trạng thái PENDING

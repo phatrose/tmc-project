@@ -432,7 +432,9 @@ export default function AdministrationPage({ session } = {}) {
           <div className="tmc-kpi-grid">
             <div className="tmc-kpi">
               <div className="tmc-kpi-label">Toàn hệ thống</div>
-              <div className="tmc-kpi-value tmc-kpi-value--success">HOẠT ĐỘNG TỐT</div>
+              <div className={`tmc-kpi-value ${loadError ? 'tmc-kpi-value--danger' : onlineEdgeNodes > 0 ? 'tmc-kpi-value--success' : 'tmc-kpi-value--warning'}`}>
+                {loadError ? 'MẤT KẾT NỐI' : onlineEdgeNodes > 0 ? 'TRỰC TUYẾN' : 'CHƯA CÓ HEARTBEAT'}
+              </div>
             </div>
             <div className="tmc-kpi">
               <div className="tmc-kpi-label">Edge Gate Agents</div>
@@ -444,7 +446,7 @@ export default function AdministrationPage({ session } = {}) {
             </div>
             <div className="tmc-kpi">
               <div className="tmc-kpi-label">Hàng đợi đồng bộ</div>
-              <div className="tmc-kpi-value tmc-kpi-value--accent">0 Lô tồn</div>
+              <div className="tmc-kpi-value tmc-kpi-value--accent">Chưa nối Edge</div>
             </div>
           </div>
 
@@ -492,10 +494,12 @@ export default function AdministrationPage({ session } = {}) {
               </p>
             </div>
             <button
-              className="tmc-btn-primary"
-              onClick={() => showToast('Đã kích hoạt tác vụ lưu trữ mô phỏng theo chính sách BR-11.')}
+              type="button"
+              className="tmc-btn-secondary"
+              disabled
+              title="Endpoint /api/v1/operations/jobs cần cấu hình job bất đồng bộ & re-auth"
             >
-              Kích hoạt lưu trữ
+              Lưu trữ tự động (chưa bật)
             </button>
           </div>
 

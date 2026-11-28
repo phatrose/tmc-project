@@ -47,6 +47,46 @@ public final class Es256ActionGrantIssuer implements TokenIssuerPort {
     }
 
     @Override
+    public String issueActionGrant(ActionGrantClaims claims) {
+        Objects.requireNonNull(claims, "claims required");
+        Objects.requireNonNull(claims.sub(), "sub required");
+        Objects.requireNonNull(claims.action(), "action required");
+        Objects.requireNonNull(claims.edgeId(), "edgeId required");
+        Objects.requireNonNull(claims.gateId(), "gateId required");
+        Objects.requireNonNull(claims.reason(), "reason required");
+
+        Instant now = clock.instant();
+        long iat = now.getEpochSecond();
+        long exp = iat + GRANT_TTL_SECONDS;
+
+        Map<String, Object> header = new LinkedHashMap<>();
+        header.put("alg", "ES256");
+        header.put("kid", keyId);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sub", claims.sub());
+        payload.put("iss", "tmc-central");
+        payload.put("aud", "tmc-edge-action");
+        payload.put("iat", iat);
+        payload.put("nbf", iat);
+        payload.put("exp", exp);
+        payload.put("jti", UUID.randomUUID().toString());
+        payload.put("action", claims.action());
+        payload.put("edgeId", claims.edgeId());
+        payload.put("gateId", claims.gateId());
+        payload.put("employeeId", claims.employeeId());
+        payload.put("reason", claims.reason());
+        if (claims.role() != null) {
+            payload.put("role", claims.role().name());
+        }
+        if (claims.scopes() != null) {
+            payload.put("scopes", List.copyOf(claims.scopes()));
+        }
+
+        return signJws(header, payload);
+    }
+
+    @Override
     public String issueToken(String userId, Role role, List<String> scopes) {
         Objects.requireNonNull(userId, "userId required");
         Objects.requireNonNull(role, "role required");
@@ -71,6 +111,10 @@ public final class Es256ActionGrantIssuer implements TokenIssuerPort {
         payload.put("role", role.name());
         payload.put("scopes", safeScopes);
 
+        return signJws(header, payload);
+    }
+
+    private String signJws(Map<String, Object> header, Map<String, Object> payload) {
         try {
             String encodedHeader = B64_URL.encodeToString(objectMapper.writeValueAsBytes(header));
             String encodedPayload = B64_URL.encodeToString(objectMapper.writeValueAsBytes(payload));

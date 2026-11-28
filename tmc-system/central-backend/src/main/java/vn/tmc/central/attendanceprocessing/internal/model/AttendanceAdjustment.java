@@ -76,6 +76,7 @@ public final class AttendanceAdjustment {
     public Instant getDecidedAt() { return decidedAt; }
     public void setDecidedAt(Instant decidedAt) { this.decidedAt = decidedAt; }
     public int getVersion() { return version; }
+    public void setVersion(int version) { this.version = version; }
     public void incrementVersion() { this.version++; }
 
     public Adjustment toContractDto() {

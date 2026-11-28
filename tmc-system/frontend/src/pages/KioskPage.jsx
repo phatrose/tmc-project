@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import jsQR from 'jsqr';
 import { request } from '../api.js';
 import { describeError, describeScanResult, newScanId } from '../lib/gateStation.js';
 import '../styles/gate-station.css';
@@ -86,7 +87,11 @@ export default function KioskPage() {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
       streamRef.current = stream;
@@ -143,20 +148,32 @@ export default function KioskPage() {
     video.srcObject = streamRef.current;
     video.play().catch(() => {});
 
-    if (typeof window.BarcodeDetector !== 'function') {
-      setCameraNotice({
-        title: 'Trình duyệt chưa hỗ trợ tự động đọc mã QR',
-        detail: 'Camera đã bật nhưng trình duyệt hiện tại không có bộ giải mã BarcodeDetector. Hãy mở bằng Chrome hoặc Edge phiên bản mới.',
-      });
-      return undefined;
-    }
+    const hasNativeDetector = typeof window.BarcodeDetector === 'function';
+    const detector = hasNativeDetector ? new window.BarcodeDetector({ formats: ['qr_code'] }) : null;
+    const canvas = hasNativeDetector ? null : document.createElement('canvas');
+    const ctx = canvas ? canvas.getContext('2d', { willReadFrequently: true }) : null;
+    setCameraNotice(null);
 
-    const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
     const interval = setInterval(async () => {
       if (!videoRef.current || videoRef.current.readyState < 2 || phaseRef.current === 'sending') return;
       try {
-        const codes = await detector.detect(videoRef.current);
-        const raw = codes?.[0]?.rawValue?.trim();
+        let raw = '';
+        if (detector) {
+          const codes = await detector.detect(videoRef.current);
+          raw = codes?.[0]?.rawValue?.trim() || '';
+        } else if (canvas && ctx) {
+          const vw = videoRef.current.videoWidth;
+          const vh = videoRef.current.videoHeight;
+          if (!vw || !vh) return;
+          if (canvas.width !== vw || canvas.height !== vh) {
+            canvas.width = vw;
+            canvas.height = vh;
+          }
+          ctx.drawImage(videoRef.current, 0, 0, vw, vh);
+          const imageData = ctx.getImageData(0, 0, vw, vh);
+          const decoded = jsQR(imageData.data, vw, vh, { inversionAttempts: 'attemptBoth' });
+          raw = decoded?.data?.trim() || '';
+        }
         if (!raw) return;
         const now = Date.now();
         if (lastScannedRef.current.token === raw && now - lastScannedRef.current.at < 3000) return;
@@ -165,7 +182,7 @@ export default function KioskPage() {
       } catch {
         // Bỏ qua lỗi đọc khung hình đơn lẻ
       }
-    }, 250);
+    }, 180);
 
     return () => clearInterval(interval);
   }, [cameraState]);

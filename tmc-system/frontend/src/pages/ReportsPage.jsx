@@ -22,12 +22,16 @@ function Pager({ value, onPage, busy }) {
   </div>;
 }
 
+const DEFAULT_FACTORY_ID = '00000000-0000-4000-8000-000000000023';
+const sevenDaysAgoLocal = () => { const d = new Date(Date.now() - 7 * 86400000); return `${d.toLocaleDateString('sv-SE')}T00:00`; };
+const tomorrowLocal = () => `${tomorrow()}T00:00`;
+
 export default function ReportsPage({ actor = null, api = null } = {}) {
   const allowed = permission => actor?.permissions?.includes(permission);
   const payrollAllowed = actor?.roles?.includes('HR') && !actor.roles.includes('AUDITOR') && allowed('payroll.export');
   const currentMonth = new Date().toLocaleDateString('sv-SE').slice(0, 7);
   const [tab, setTab] = useState(allowed('report.read') ? 'attendance' : 'audit');
-  const [factoryId, setFactoryId] = useState(actor?.factoryIds?.[0] || '');
+  const [factoryId, setFactoryId] = useState(actor?.factoryIds?.[0] || DEFAULT_FACTORY_ID);
   const [period, setPeriod] = useState(currentMonth);
   const [from, setFrom] = useState(`${currentMonth}-01`);
   const [to, setTo] = useState(tomorrow);
@@ -37,8 +41,8 @@ export default function ReportsPage({ actor = null, api = null } = {}) {
   const [history, setHistory] = useState(emptyPage);
   const [actorId, setActorId] = useState('');
   const [action, setAction] = useState('');
-  const [auditFrom, setAuditFrom] = useState('');
-  const [auditTo, setAuditTo] = useState('');
+  const [auditFrom, setAuditFrom] = useState(sevenDaysAgoLocal);
+  const [auditTo, setAuditTo] = useState(tomorrowLocal);
   const [format, setFormat] = useState('CSV');
   const [reason, setReason] = useState('');
   const [version, setVersion] = useState(1);
@@ -58,7 +62,7 @@ export default function ReportsPage({ actor = null, api = null } = {}) {
     requests.current.clear();
     filterVersion.current++;
     mutation.current = createReportMutation();
-    setFactoryId(actor?.factoryIds?.[0] || '');
+    setFactoryId(actor?.factoryIds?.[0] || DEFAULT_FACTORY_ID);
     setRecords(emptyPage); setAuditRows(emptyPage); setHistory(emptyPage); setJobs([]); setBatch(null);
     setError(null); setNotice(''); setBusy(false);
     return () => { for (const controller of requests.current) controller.abort(); };
@@ -179,7 +183,9 @@ export default function ReportsPage({ actor = null, api = null } = {}) {
     <div className="t4-filters">
       <label>Nhà máy<input value={factoryId} onChange={event => setFactoryId(event.target.value)} list="t4-factories"
         pattern={uuid4} required placeholder="UUID nhà máy" /></label>
-      <datalist id="t4-factories">{actor.factoryIds.map(id => <option key={id} value={id} />)}</datalist>
+      <datalist id="t4-factories">
+        {(actor.factoryIds.length ? actor.factoryIds : [DEFAULT_FACTORY_ID]).map(id => <option key={id} value={id} />)}
+      </datalist>
       <label>Kỳ xuất<input type="month" value={period} onChange={event => setPeriod(event.target.value)} required /></label>
       <label>Định dạng<select value={format} onChange={event => setFormat(event.target.value)}>
         <option>CSV</option><option>XLSX</option><option>PDF</option>

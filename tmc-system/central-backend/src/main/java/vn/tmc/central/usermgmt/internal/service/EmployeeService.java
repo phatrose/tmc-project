@@ -10,10 +10,12 @@ import org.springframework.transaction.annotation.Transactional;
 import vn.tmc.central.usermgmt.api.*;
 import vn.tmc.central.usermgmt.internal.model.Department;
 import vn.tmc.central.usermgmt.internal.model.Employee;
+import vn.tmc.central.usermgmt.internal.model.EmployeeRevocationOutboxEntry;
 import vn.tmc.central.usermgmt.internal.model.PolicyAssignment;
 import vn.tmc.central.usermgmt.internal.model.UserAccount;
 import vn.tmc.central.usermgmt.internal.repository.DepartmentRepository;
 import vn.tmc.central.usermgmt.internal.repository.EmployeeRepository;
+import vn.tmc.central.usermgmt.internal.repository.EmployeeRevocationOutboxRepository;
 import vn.tmc.central.usermgmt.internal.repository.PolicyAssignmentRepository;
 import vn.tmc.central.usermgmt.internal.repository.UserAccountRepository;
 
@@ -43,6 +45,7 @@ public class EmployeeService implements EmployeeManagement {
     private final UserAccountRepository userAccountRepository;
     private final PasswordEncoder passwordEncoder;
     private final Authentication authentication;
+    private final EmployeeRevocationOutboxRepository revocationOutboxRepository;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            PolicyAssignmentRepository policyAssignmentRepository,
@@ -50,7 +53,17 @@ public class EmployeeService implements EmployeeManagement {
                            UserAccountRepository userAccountRepository,
                            PasswordEncoder passwordEncoder) {
         this(employeeRepository, policyAssignmentRepository, departmentRepository,
-                userAccountRepository, passwordEncoder, null);
+                userAccountRepository, passwordEncoder, null, null);
+    }
+
+    public EmployeeService(EmployeeRepository employeeRepository,
+                           PolicyAssignmentRepository policyAssignmentRepository,
+                           DepartmentRepository departmentRepository,
+                           UserAccountRepository userAccountRepository,
+                           PasswordEncoder passwordEncoder,
+                           Authentication authentication) {
+        this(employeeRepository, policyAssignmentRepository, departmentRepository,
+                userAccountRepository, passwordEncoder, authentication, null);
     }
 
     @Autowired
@@ -59,13 +72,15 @@ public class EmployeeService implements EmployeeManagement {
                            DepartmentRepository departmentRepository,
                            UserAccountRepository userAccountRepository,
                            PasswordEncoder passwordEncoder,
-                           Authentication authentication) {
+                           @Autowired(required = false) Authentication authentication,
+                           @Autowired(required = false) EmployeeRevocationOutboxRepository revocationOutboxRepository) {
         this.employeeRepository = Objects.requireNonNull(employeeRepository);
         this.policyAssignmentRepository = Objects.requireNonNull(policyAssignmentRepository);
         this.departmentRepository = Objects.requireNonNull(departmentRepository);
         this.userAccountRepository = Objects.requireNonNull(userAccountRepository);
         this.passwordEncoder = Objects.requireNonNull(passwordEncoder);
         this.authentication = authentication;
+        this.revocationOutboxRepository = revocationOutboxRepository;
     }
 
     // ─────────────────────────── Employees ────────────────────────────────────
@@ -158,6 +173,7 @@ public class EmployeeService implements EmployeeManagement {
         validateFactoryMutationScope(actor, employee.getFactoryId());
         validateFactoryMutationScope(actor, cmd.factoryId());
 
+        boolean wasActive = employee.isActive();
         employee.update(
                 cmd.employeeCode().trim(),
                 cmd.displayName().trim(),
@@ -168,9 +184,15 @@ public class EmployeeService implements EmployeeManagement {
         );
 
         employeeRepository.save(employee);
-        if (!cmd.active() && authentication != null) {
-            userAccountRepository.findByEmployeeId(id)
-                    .ifPresent(acc -> authentication.revokeSessionsForUser(acc.getId()));
+        if (!cmd.active()) {
+            if (wasActive && revocationOutboxRepository != null) {
+                revocationOutboxRepository.save(new EmployeeRevocationOutboxEntry(
+                        id, actor != null ? actor.userId() : null));
+            }
+            if (authentication != null) {
+                userAccountRepository.findByEmployeeId(id)
+                        .ifPresent(acc -> authentication.revokeSessionsForUser(acc.getId()));
+            }
         }
         return employee.toView();
     }
@@ -230,11 +252,18 @@ public class EmployeeService implements EmployeeManagement {
                         || existing.isActive() != item.active();
 
                 if (changed) {
+                    boolean wasActive = existing.isActive();
                     existing.update(code, item.displayName().trim(), item.factoryId().trim(), item.departmentId(), item.active(), existing.getVersion());
                     employeeRepository.save(existing);
-                    if (!item.active() && authentication != null) {
-                        userAccountRepository.findByEmployeeId(existing.getId())
-                                .ifPresent(acc -> authentication.revokeSessionsForUser(acc.getId()));
+                    if (!item.active()) {
+                        if (wasActive && revocationOutboxRepository != null) {
+                            revocationOutboxRepository.save(new EmployeeRevocationOutboxEntry(
+                                    existing.getId(), actor != null ? actor.userId() : null));
+                        }
+                        if (authentication != null) {
+                            userAccountRepository.findByEmployeeId(existing.getId())
+                                    .ifPresent(acc -> authentication.revokeSessionsForUser(acc.getId()));
+                        }
                     }
                     results.add(new ImportResult.ImportItemResult(code, "UPDATED", null));
                 } else {

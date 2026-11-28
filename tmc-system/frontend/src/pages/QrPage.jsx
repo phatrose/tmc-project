@@ -13,16 +13,17 @@ const TTL_SECONDS = 60;
 
 async function fetchQrToken(accessToken) {
   const requestId = crypto.randomUUID();
+  const headers = {
+    Accept: 'application/json',
+    'X-Request-Id': requestId,
+  };
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
   const response = await fetch(`${API_BASE}/me/qr-token`, {
     method: 'GET',
-    credentials: 'omit',
+    credentials: 'same-origin',
     redirect: 'error',
     cache: 'no-store',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/json',
-      'X-Request-Id': requestId,
-    },
+    headers,
   });
   if (!response.ok) {
     let apiError = { code: 'INTERNAL_ERROR', message: 'Lỗi không xác định', requestId, retryable: true };
@@ -49,13 +50,14 @@ async function fetchQrToken(accessToken) {
 function QrCanvas({ token }) {
   const qr = useMemo(() => {
     try {
-      return encodeQr(token, { ecLevel: 'M' });
+      // Mức sửa lỗi L giảm số hàng/cột tối đa giúp từng ô QR to, sắc nét và dễ bắt nét hơn trên webcam/điện thoại.
+      return encodeQr(token, { ecLevel: 'L' });
     } catch {
       return null;
     }
   }, [token]);
   if (!qr) return <p role="alert">Không tạo được hình mã QR từ dữ liệu nhận về.</p>;
-  const quiet = 4;
+  const quiet = 3;
   const paths = [];
   for (let r = 0; r < qr.size; r++) {
     for (let c = 0; c < qr.size; c++) {
@@ -69,10 +71,17 @@ function QrCanvas({ token }) {
     <svg
       role="img"
       aria-label="Mã QR cá nhân đang hoạt động, quét tại cổng để chấm công"
-      width="240"
-      height="240"
+      width="360"
+      height="360"
       viewBox={`0 0 ${dimension} ${dimension}`}
-      style={{ background: '#ffffff', shapeRendering: 'crispEdges' }}
+      style={{
+        width: 'min(360px, 85vw)',
+        height: 'auto',
+        display: 'block',
+        background: '#ffffff',
+        shapeRendering: 'crispEdges',
+        imageRendering: 'pixelated',
+      }}
     >
       <rect width={dimension} height={dimension} fill="#ffffff" />
       <path d={paths.join('')} fill="#000000" />
@@ -82,12 +91,13 @@ function QrCanvas({ token }) {
 
 export default function QrPage({ session }) {
   const accessToken = session?.accessToken;
+  const isAuthenticated = Boolean(session);
   const [state, setState] = useState({ status: 'idle', token: null, expiresAt: null, error: null });
   const [now, setNow] = useState(() => Date.now());
   const inFlight = useRef(false);
 
   const load = useCallback(async () => {
-    if (!accessToken || inFlight.current) return;
+    if (!isAuthenticated || inFlight.current) return;
     inFlight.current = true;
     setState((prev) => ({ ...prev, status: prev.token ? 'refreshing' : 'loading', error: null }));
     try {
@@ -98,10 +108,10 @@ export default function QrPage({ session }) {
     } finally {
       inFlight.current = false;
     }
-  }, [accessToken]);
+  }, [accessToken, isAuthenticated]);
 
   useEffect(() => {
-    if (!accessToken) return undefined;
+    if (!isAuthenticated) return undefined;
     load();
     const tick = setInterval(() => setNow(Date.now()), 1000);
     const onVisible = () => {
@@ -114,7 +124,7 @@ export default function QrPage({ session }) {
       inFlight.current = false;
       setState({ status: 'idle', token: null, expiresAt: null, error: null });
     };
-  }, [accessToken, load]);
+  }, [isAuthenticated, load]);
 
   const secondsLeft = state.expiresAt ? Math.max(0, Math.round((state.expiresAt.getTime() - now) / 1000)) : 0;
   const isExpired = state.status === 'ready' && Boolean(state.expiresAt) && secondsLeft === 0;
@@ -125,7 +135,7 @@ export default function QrPage({ session }) {
     if (secondsLeft <= REFRESH_MARGIN_SECONDS) load();
   }, [secondsLeft, state.status, load]);
 
-  if (!accessToken) {
+  if (!isAuthenticated) {
     return (
       <section className="personal-qr-card">
         <h1>QR cá nhân</h1>

@@ -46,27 +46,48 @@ public class EmployeeController {
             "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
     private static final String REQUEST_ID_ATTR = "vn.tmc.central.PlatformErrors.requestId";
 
-    private record CachedIdempotent(String payloadHash, int status, Object body, Instant expiresAt) {}
-
     private static final class IdempotencyConflictException extends RuntimeException {
         IdempotencyConflictException(String message) { super(message); }
     }
 
     private final EmployeeManagement employeeManagement;
     private final Authentication authentication;
-    private final Map<String, CachedIdempotent> idempotencyStore = new ConcurrentHashMap<>();
+    private final vn.tmc.central.usermgmt.internal.service.UserMgmtIdempotencyService idempotencyService;
 
-    public EmployeeController(EmployeeManagement employeeManagement, Authentication authentication) {
+    @org.springframework.beans.factory.annotation.Autowired
+    public EmployeeController(
+            EmployeeManagement employeeManagement,
+            Authentication authentication,
+            @org.springframework.beans.factory.annotation.Autowired(required = false)
+            vn.tmc.central.usermgmt.internal.service.UserMgmtIdempotencyService idempotencyService
+    ) {
         this.employeeManagement = java.util.Objects.requireNonNull(employeeManagement);
         this.authentication = java.util.Objects.requireNonNull(authentication);
+        this.idempotencyService = idempotencyService != null
+                ? idempotencyService
+                : new vn.tmc.central.usermgmt.internal.service.UserMgmtIdempotencyService(null, null, null);
+    }
+
+    public EmployeeController(EmployeeManagement employeeManagement, Authentication authentication) {
+        this(employeeManagement, authentication, null);
     }
 
     // ─────────────────────────── 1. Auth Endpoints (§3, §5) ───────────────────
 
     @PostMapping("/auth/login")
-    public ResponseEntity<Session> login(@Valid @RequestBody LoginRequest request) {
+    public ResponseEntity<Session> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpReq) {
         Session session = authentication.authenticate(request);
-        return ResponseEntity.ok(session);
+        org.springframework.http.ResponseCookie cookie = org.springframework.http.ResponseCookie
+                .from("tmc_session", session.accessToken())
+                .httpOnly(true)
+                .sameSite("Strict")
+                .secure(httpReq != null && httpReq.isSecure())
+                .path("/api/v1")
+                .maxAge(900)
+                .build();
+        return ResponseEntity.ok()
+                .header(org.springframework.http.HttpHeaders.SET_COOKIE, cookie.toString())
+                .body(session);
     }
 
     @GetMapping("/auth/me")
@@ -76,17 +97,28 @@ public class EmployeeController {
     }
 
     @PostMapping("/auth/logout")
-    public ResponseEntity<Void> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+    public ResponseEntity<Void> logout(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            HttpServletRequest httpReq) {
         authentication.logout(authHeader);
-        return ResponseEntity.noContent().build();
+        org.springframework.http.ResponseCookie clearCookie = org.springframework.http.ResponseCookie
+                .from("tmc_session", "")
+                .httpOnly(true)
+                .sameSite("Strict")
+                .secure(httpReq != null && httpReq.isSecure())
+                .path("/api/v1")
+                .maxAge(0)
+                .build();
+        return ResponseEntity.noContent()
+                .header(org.springframework.http.HttpHeaders.SET_COOKIE, clearCookie.toString())
+                .build();
     }
 
     @PostMapping("/auth/reauth")
     public ResponseEntity<ReauthResponse> reauth(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
             @Valid @RequestBody ReauthRequest request) {
-        ActorContext actor = authentication.getActorContext(authHeader);
-        return ResponseEntity.ok(authentication.reauth(actor, request));
+        return ResponseEntity.ok(authentication.reauth(authHeader, request));
     }
 
     @PostMapping("/auth/action-grants")
@@ -119,8 +151,8 @@ public class EmployeeController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateEmployeeCommand cmd) {
         ActorContext actor = authentication.getActorContext(authHeader);
-        return executeIdempotent(actor, "POST:/api/v1/employees", idempotencyKey, String.valueOf(cmd),
-                HttpStatus.CREATED, () -> employeeManagement.createEmployee(actor, cmd));
+        return executeIdempotent(actor, "POST:/api/v1/employees", idempotencyKey, cmd,
+                HttpStatus.CREATED, EmployeeView.class, () -> employeeManagement.createEmployee(actor, cmd));
     }
 
     @GetMapping("/employees/{id}")
@@ -150,8 +182,8 @@ public class EmployeeController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody ImportBatchRequest request) {
         ActorContext actor = authentication.getActorContext(authHeader);
-        return executeIdempotent(actor, "POST:/api/v1/employees/imports", idempotencyKey, String.valueOf(request),
-                HttpStatus.OK, () -> employeeManagement.importEmployees(actor, request.records()));
+        return executeIdempotent(actor, "POST:/api/v1/employees/imports", idempotencyKey, request,
+                HttpStatus.OK, ImportResult.class, () -> employeeManagement.importEmployees(actor, request.records()));
     }
 
     // ─────────────────────────── 3. Access Policy Endpoints (§4) ──────────────
@@ -194,8 +226,8 @@ public class EmployeeController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateDepartmentCommand cmd) {
         ActorContext actor = authentication.getActorContext(authHeader);
-        return executeIdempotent(actor, "POST:/api/v1/departments", idempotencyKey, String.valueOf(cmd),
-                HttpStatus.CREATED, () -> employeeManagement.createDepartment(actor, cmd));
+        return executeIdempotent(actor, "POST:/api/v1/departments", idempotencyKey, cmd,
+                HttpStatus.CREATED, DepartmentView.class, () -> employeeManagement.createDepartment(actor, cmd));
     }
 
     @GetMapping("/departments/{id}")
@@ -235,8 +267,17 @@ public class EmployeeController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody CreateAccountCommand cmd) {
         ActorContext actor = authentication.getActorContext(authHeader);
-        return executeIdempotent(actor, "POST:/api/v1/accounts", idempotencyKey, String.valueOf(cmd),
-                HttpStatus.CREATED, () -> employeeManagement.createAccount(actor, cmd));
+        // Không lưu/log initialPassword thô nhưng vẫn phân biệt mật khẩu khác cho cùng Idempotency-Key (IDEM-09)
+        Map<String, Object> sanitizedFingerprint = new java.util.LinkedHashMap<>();
+        sanitizedFingerprint.put("username", cmd.username());
+        sanitizedFingerprint.put("employeeId", cmd.employeeId());
+        sanitizedFingerprint.put("roles", cmd.roles());
+        sanitizedFingerprint.put("factoryIds", cmd.factoryIds());
+        sanitizedFingerprint.put("departmentIds", cmd.departmentIds());
+        sanitizedFingerprint.put("scope", cmd.scope());
+        sanitizedFingerprint.put("passwordDigest", sha256Hex("tmc-idem-pw-v1:" + (cmd.initialPassword() == null ? "" : cmd.initialPassword())));
+        return executeIdempotent(actor, "POST:/api/v1/accounts", idempotencyKey, sanitizedFingerprint,
+                HttpStatus.CREATED, AccountView.class, () -> employeeManagement.createAccount(actor, cmd));
     }
 
     @PutMapping("/accounts/{id}")
@@ -251,28 +292,22 @@ public class EmployeeController {
 
     // ─────────────────────────── Idempotency Helper (§2) ──────────────────────
 
-    @SuppressWarnings("unchecked")
     private <T> ResponseEntity<T> executeIdempotent(ActorContext actor, String scopePath, String idempotencyKey,
-                                                    String canonicalInput, HttpStatus status, Supplier<T> action) {
+                                                    Object canonicalPayload, HttpStatus status, Class<T> responseType,
+                                                    Supplier<T> action) {
         if (idempotencyKey == null || !UUID4.matcher(idempotencyKey).matches()) {
             throw new IllegalArgumentException("Header Idempotency-Key phải là UUIDv4 chữ thường.");
         }
-        String cacheKey = actor.userId() + "|" + scopePath + "|" + idempotencyKey;
-        String hash = sha256(canonicalInput);
-        Instant now = Instant.now();
-        CachedIdempotent existing = idempotencyStore.get(cacheKey);
-        if (existing != null && now.isBefore(existing.expiresAt())) {
-            if (!existing.payloadHash().equals(hash)) {
-                throw new IdempotencyConflictException("Idempotency-Key đã được sử dụng với nội dung khác.");
-            }
-            return ResponseEntity.status(existing.status()).body((T) existing.body());
+        try {
+            T body = idempotencyService.execute(
+                    actor.userId(), scopePath, idempotencyKey, canonicalPayload, status.value(), responseType, action::get);
+            return ResponseEntity.status(status).body(body);
+        } catch (vn.tmc.central.usermgmt.internal.service.UserMgmtIdempotencyService.ConflictException ex) {
+            throw new IdempotencyConflictException(ex.getMessage());
         }
-        T result = action.get();
-        idempotencyStore.put(cacheKey, new CachedIdempotent(hash, status.value(), result, now.plus(48, ChronoUnit.HOURS)));
-        return ResponseEntity.status(status).body(result);
     }
 
-    private static String sha256(String input) {
+    private static String sha256Hex(String input) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(input.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest);

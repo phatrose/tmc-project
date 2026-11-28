@@ -4,10 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
+import java.security.cert.X509Certificate;
 import java.util.List;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.*;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -21,7 +19,9 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import vn.tmc.central.usermgmt.api.Authentication;
 
 /**
- * PHỤ TRÁCH: Task 8. Real Task 1 sessions + optional env-configured Edge device auth (fail-closed when unset).
+ * PHỤ TRÁCH: Task 8 (DEVICE-01, DEVICE-03, DEVICE-04).
+ * Real Task 1 sessions cho người dùng + mTLS X.509 SAN URI bắt buộc cho thiết bị Edge.
+ * KHÔNG chấp nhận header tự khai (X-Edge-Auth / X-Edge-Id / X-Factory-Id) làm fallback.
  */
 @Configuration(proxyBeanMethods = false)
 @Profile("integration-preview")
@@ -32,10 +32,9 @@ public class PreviewSecurityConfiguration {
     SecurityFilterChain previewSecurity(
             HttpSecurity http,
             Authentication sessions,
-            ObjectMapper json,
-            @Value("${TMC_EDGE_SHARED_TOKEN:}") String edgeSharedToken
+            CentralMtlsDeviceAuthenticator mtlsAuthenticator,
+            ObjectMapper json
     ) throws Exception {
-        final String expectedEdgeToken = edgeSharedToken == null ? "" : edgeSharedToken.trim();
         http.sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .csrf(c -> c.disable())
                 .requestCache(c -> c.disable())
@@ -46,16 +45,18 @@ public class PreviewSecurityConfiguration {
                     @Override
                     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
                             throws ServletException, IOException {
-                        String edgeAuth = req.getHeader("X-Edge-Auth");
-                        if (edgeAuth != null) {
-                            if (expectedEdgeToken.isEmpty() || !constantTimeEquals(expectedEdgeToken, edgeAuth)) {
-                                PlatformErrors.write(json, req, res, 401, "UNAUTHENTICATED", "Invalid edge device credentials.", false);
+                        X509Certificate[] clientCerts = (X509Certificate[]) req.getAttribute("jakarta.servlet.request.X509Certificate");
+                        if (clientCerts != null && clientCerts.length > 0) {
+                            var device = mtlsAuthenticator.authenticate(clientCerts);
+                            if (device.isEmpty()) {
+                                PlatformErrors.write(json, req, res, 403, "DEVICE_BINDING_MISMATCH",
+                                        "Client certificate is not provisioned or missing valid SAN URI.", false);
                                 return;
                             }
                             SecurityContextHolder.getContext().setAuthentication(
                                     new UsernamePasswordAuthenticationToken(
-                                            "edge-device",
-                                            null,
+                                            device.get(),
+                                            clientCerts[0],
                                             List.of(new SimpleGrantedAuthority("ROLE_EDGE_DEVICE"))));
                             chain.doFilter(req, res);
                             return;
@@ -87,9 +88,5 @@ public class PreviewSecurityConfiguration {
                         .accessDeniedHandler((req, res, ex) ->
                                 PlatformErrors.write(json, req, res, 403, "FORBIDDEN", "Access denied.", false)));
         return http.build();
-    }
-
-    private static boolean constantTimeEquals(String a, String b) {
-        return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
     }
 }

@@ -103,7 +103,9 @@ public class AuthenticationService implements Authentication {
     public void logout(String accessToken) {
         String token = extractBearerToken(accessToken);
         if (token != null) {
-            activeSessions.remove(hashToken(token));
+            String hash = hashToken(token);
+            activeSessions.remove(hash);
+            reauthDeadlines.remove(hash);
         }
     }
 
@@ -112,8 +114,40 @@ public class AuthenticationService implements Authentication {
         if (userId == null || userId.isBlank()) {
             return;
         }
-        activeSessions.entrySet().removeIf(entry -> userId.equals(entry.getValue().actor().userId()));
+        activeSessions.entrySet().removeIf(entry -> {
+            if (userId.equals(entry.getValue().actor().userId())) {
+                reauthDeadlines.remove(entry.getKey());
+                return true;
+            }
+            return false;
+        });
         reauthDeadlines.remove(userId);
+    }
+
+    @Override
+    public ReauthResponse reauth(String accessToken, ReauthRequest request) {
+        String token = extractBearerToken(accessToken);
+        if (token == null) {
+            throw new InvalidCredentialsException("Yêu cầu phiên làm việc hợp lệ.");
+        }
+        ActorContext actor = getActorContext(accessToken);
+        Instant until = verifyReauthPassword(actor, request);
+        reauthDeadlines.put(hashToken(token), until);
+        return new ReauthResponse(until);
+    }
+
+    @Override
+    public boolean isSessionReauthenticated(String accessToken) {
+        String token = extractBearerToken(accessToken);
+        if (token == null) return false;
+        String hash = hashToken(token);
+        StoredSession session = activeSessions.get(hash);
+        if (session == null || Instant.now().isAfter(session.expiresAt())) {
+            reauthDeadlines.remove(hash);
+            return false;
+        }
+        Instant deadline = reauthDeadlines.get(hash);
+        return deadline != null && !Instant.now().isAfter(deadline);
     }
 
     @Override
@@ -121,6 +155,12 @@ public class AuthenticationService implements Authentication {
         if (actor == null) {
             throw new InvalidCredentialsException("Yêu cầu phiên làm việc hợp lệ.");
         }
+        Instant until = verifyReauthPassword(actor, request);
+        reauthDeadlines.put(actor.userId(), until);
+        return new ReauthResponse(until);
+    }
+
+    private Instant verifyReauthPassword(ActorContext actor, ReauthRequest request) {
         Objects.requireNonNull(request, "request required");
         if (request.password() == null || request.password().isEmpty()) {
             throw new InvalidCredentialsException("Mật khẩu xác thực lại không hợp lệ.");
@@ -134,9 +174,7 @@ public class AuthenticationService implements Authentication {
         if (!passwordEncoder.matches(request.password(), account.getPasswordHash())) {
             throw new InvalidCredentialsException("Mật khẩu xác thực lại không chính xác.");
         }
-        Instant until = Instant.now().plus(5, ChronoUnit.MINUTES);
-        reauthDeadlines.put(actor.userId(), until);
-        return new ReauthResponse(until);
+        return Instant.now().plus(5, ChronoUnit.MINUTES);
     }
 
     @Override
@@ -147,8 +185,16 @@ public class AuthenticationService implements Authentication {
         if (!"MANUAL".equals(request.action()) && !"EMERGENCY".equals(request.action())) {
             throw new IllegalArgumentException("action phải là MANUAL hoặc EMERGENCY");
         }
-        if ("MANUAL".equals(request.action()) && (request.employeeId() == null || request.employeeId().isBlank())) {
-            throw new IllegalArgumentException("MANUAL action grant yêu cầu employeeId");
+        if (request.reason() == null || request.reason().trim().length() < 10 || request.reason().trim().length() > 500) {
+            throw new IllegalArgumentException("reason phải có độ dài từ 10 đến 500 ký tự");
+        }
+        requireUuid(request.edgeId(), "edgeId");
+        requireUuid(request.gateId(), "gateId");
+        if ("MANUAL".equals(request.action())) {
+            if (request.employeeId() == null || request.employeeId().isBlank()) {
+                throw new IllegalArgumentException("MANUAL action grant yêu cầu employeeId");
+            }
+            requireUuid(request.employeeId(), "employeeId");
         }
         if ("EMERGENCY".equals(request.action()) && request.employeeId() != null && !request.employeeId().isBlank()) {
             throw new IllegalArgumentException("EMERGENCY action grant yêu cầu employeeId phải là null");
@@ -176,11 +222,32 @@ public class AuthenticationService implements Authentication {
             throw new InvalidCredentialsException("Mật khẩu xác thực lại không chính xác.");
         }
 
-        // 3. Tạo token grant (hạn 60s) qua tokenIssuerPort
+        // 3. Tạo token grant (hạn 60s, đầy đủ claims binding theo CONTRACT-V1 §5)
         Instant expiresAt = Instant.now().plus(60, ChronoUnit.SECONDS);
-        String grant = tokenIssuerPort.issueToken(actor.userId(), actor.roles().isEmpty() ? Role.GUARD : actor.roles().get(0), List.of(requiredPerm));
+        Role primaryRole = actor.roles().isEmpty() ? Role.GUARD : actor.roles().get(0);
+        String grant = tokenIssuerPort.issueActionGrant(new TokenIssuerPort.ActionGrantClaims(
+                actor.userId(),
+                request.action(),
+                request.edgeId().trim(),
+                request.gateId().trim(),
+                "MANUAL".equals(request.action()) ? request.employeeId().trim() : null,
+                request.reason().trim(),
+                primaryRole,
+                List.of(requiredPerm)
+        ));
 
         return new ActionGrantResponse(grant, expiresAt);
+    }
+
+    private static void requireUuid(String raw, String field) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException(field + " bắt buộc phải là UUID hợp lệ");
+        }
+        try {
+            UUID.fromString(raw.trim());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(field + " phải là UUID hợp lệ", e);
+        }
     }
 
     private static String extractBearerToken(String accessToken) {
@@ -230,9 +297,14 @@ public class AuthenticationService implements Authentication {
                     perms.add("system.manage");
                     perms.add("employee.manage");
                     perms.add("access-policy.manage");
+                    perms.add("audit.read");
+                    perms.add("audit.export");
                 }
                 case EXECUTIVE -> perms.add("report.read");
-                case AUDITOR -> perms.add("audit.read");
+                case AUDITOR -> {
+                    perms.add("audit.read");
+                    perms.add("audit.export");
+                }
             }
         }
 

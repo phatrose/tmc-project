@@ -4,6 +4,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -14,9 +16,13 @@ import vn.tmc.central.systemadmin.api.DeviceStatusView;
 import vn.tmc.central.systemadmin.api.FactoryView;
 import vn.tmc.central.usermgmt.api.*;
 
-/** PHỤ TRÁCH: Task 8. Explicit adapters between existing module APIs (including Reporting/Payroll sources). */
+/**
+ * PHỤ TRÁCH: Task 8 (REPORT-01).
+ * Nối trực tiếp 6 ReportingSources provider từ public API của các module thật (usermgmt, attendanceprocessing, systemadmin)
+ * cho mọi runtime profile (trừ profile platform-only), không dùng mock.
+ */
 @Configuration(proxyBeanMethods = false)
-@Profile("integration-preview")
+@Profile("!platform")
 public class PreviewReportingConfiguration {
 
     private static final ActorContext SYSTEM_REPORTING_ACTOR = new ActorContext(
@@ -44,6 +50,7 @@ public class PreviewReportingConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(ReportingSources.SessionQuery.class)
     ReportingSources.SessionQuery reportSessions(Authentication auth) {
         return token -> {
             var a = auth.getActorContext(token);
@@ -53,6 +60,7 @@ public class PreviewReportingConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(ReportingSources.EmployeeSource.class)
     ReportingSources.EmployeeSource reportEmployees(EmployeeManagement employees) {
         return (a, id) -> {
             var e = employees.getEmployee(actor(a), id);
@@ -61,6 +69,7 @@ public class PreviewReportingConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(ReportingSources.AttendanceSource.class)
     ReportingSources.AttendanceSource reportAttendance(AttendanceQueries queries) {
         return (a, f) -> {
             var p = queries.dailyRecords(actor(a),
@@ -76,6 +85,7 @@ public class PreviewReportingConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(ReportingSources.ConfigurationQuery.class)
     ReportingSources.ConfigurationQuery reportConfiguration(Administration administration) {
         return new ReportingSources.ConfigurationQuery() {
             @Override
@@ -115,6 +125,7 @@ public class PreviewReportingConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(ReportingSources.RosterQuery.class)
     ReportingSources.RosterQuery reportRoster(EmployeeManagement employees) {
         return (factoryId, date, zoneId) -> {
             List<ReportingSources.RosterEntry> entries = new ArrayList<>();
@@ -138,6 +149,7 @@ public class PreviewReportingConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(ReportingSources.PayrollAttendance.class)
     ReportingSources.PayrollAttendance reportPayrollAttendance(AttendanceQueries queries, Clock clock) {
         return new ReportingSources.PayrollAttendance() {
             private final Map<String, Integer> frozenVersions = new ConcurrentHashMap<>();

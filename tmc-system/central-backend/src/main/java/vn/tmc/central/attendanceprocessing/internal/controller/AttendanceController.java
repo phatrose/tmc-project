@@ -1,50 +1,26 @@
 package vn.tmc.central.attendanceprocessing.internal.controller;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-import vn.tmc.central.attendanceprocessing.api.Adjustment;
-import vn.tmc.central.attendanceprocessing.api.AdjustmentDecision;
-import vn.tmc.central.attendanceprocessing.api.AdjustmentRequest;
-import vn.tmc.central.attendanceprocessing.api.AdjustmentRequestCommand;
-import vn.tmc.central.attendanceprocessing.api.AdjustmentReviewCommand;
-import vn.tmc.central.attendanceprocessing.api.AttendanceAdjustmentPort;
-import vn.tmc.central.attendanceprocessing.api.AttendanceAdjustmentView;
-import vn.tmc.central.attendanceprocessing.api.AttendanceEventView;
-import vn.tmc.central.attendanceprocessing.api.AttendanceFilter;
-import vn.tmc.central.attendanceprocessing.api.AttendanceQueries;
-import vn.tmc.central.attendanceprocessing.api.AttendanceView;
-import vn.tmc.central.attendanceprocessing.api.DailyAttendance;
-import vn.tmc.central.attendanceprocessing.api.MonthlyAttendanceSummaryView;
-import vn.tmc.central.attendanceprocessing.api.PresenceView;
-import vn.tmc.central.attendanceprocessing.internal.service.IdempotencyConflictException;
+import org.springframework.web.bind.annotation.*;
+import vn.tmc.central.attendanceprocessing.api.*;
+import vn.tmc.central.attendanceprocessing.internal.service.AttendanceIdempotencyService;
 import vn.tmc.central.usermgmt.api.ActorContext;
 import vn.tmc.contracts.Page;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
-import java.time.temporal.ChronoUnit;
-import java.util.HexFormat;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * PHỤ TRÁCH: Task 3.
  * VAI TRÒ: Controller REST API chấm công theo CONTRACT-V1.md §9.
+ * Persistence & khóa idempotency được tách xuống AttendanceIdempotencyService.
  */
 @RestController
 @org.springframework.context.annotation.Profile("!platform")
@@ -52,20 +28,29 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequestMapping("/api/v1/attendance")
 public final class AttendanceController {
 
-    private record CachedAdjustment(String payloadHash, Adjustment adjustment, Instant expiresAt) {}
-
     private final AttendanceQueries queryService;
     private final AttendanceAdjustmentPort adjustmentService;
-    private final Map<String, CachedAdjustment> adjustmentIdempotency = new ConcurrentHashMap<>();
+    private final AttendanceIdempotencyService idempotencyService;
 
-    @org.springframework.beans.factory.annotation.Autowired
-    public AttendanceController(AttendanceQueries queryService, AttendanceAdjustmentPort adjustmentService) {
+    @Autowired
+    public AttendanceController(
+            AttendanceQueries queryService,
+            @Autowired(required = false) AttendanceAdjustmentPort adjustmentService,
+            @Autowired(required = false) AttendanceIdempotencyService idempotencyService
+    ) {
         this.queryService = Objects.requireNonNull(queryService, "queryService must not be null");
         this.adjustmentService = adjustmentService;
+        this.idempotencyService = idempotencyService != null
+                ? idempotencyService
+                : new AttendanceIdempotencyService(null, null, null);
+    }
+
+    public AttendanceController(AttendanceQueries queryService, AttendanceAdjustmentPort adjustmentService) {
+        this(queryService, adjustmentService, null);
     }
 
     public AttendanceController(AttendanceQueries queryService) {
-        this(queryService, queryService instanceof AttendanceAdjustmentPort a ? a : null);
+        this(queryService, queryService instanceof AttendanceAdjustmentPort a ? a : null, null);
     }
 
     // PHỤ TRÁCH: Task 8. Use the verified session, never a fabricated HR actor.
@@ -77,9 +62,6 @@ public final class AttendanceController {
         return actor;
     }
 
-    /**
-     * GET /api/v1/attendance/events: Nhật ký sự kiện quẹt thẻ bất biến (Page<AttendanceEventView>).
-     */
     @GetMapping("/events")
     public ResponseEntity<Page<AttendanceEventView>> queryEvents(
             @RequestParam(value = "employeeId", required = false) UUID employeeId,
@@ -90,13 +72,9 @@ public final class AttendanceController {
             @RequestParam(value = "size", defaultValue = "20") int size
     ) {
         ActorContext context = resolveActor();
-        Page<AttendanceEventView> result = queryService.queryEvents(context, employeeId, factoryId, from, to, page, size);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(queryService.queryEvents(context, employeeId, factoryId, from, to, page, size));
     }
 
-    /**
-     * GET /api/v1/attendance/records: Bảng công ngày (Page<DailyAttendance>) theo khoảng [from, to).
-     */
     @GetMapping(value = {"/records", "/daily"})
     public ResponseEntity<Page<DailyAttendance>> queryRecords(
             @RequestParam(value = "employeeId", required = false) UUID employeeId,
@@ -108,56 +86,36 @@ public final class AttendanceController {
     ) {
         ActorContext context = resolveActor();
         AttendanceFilter filter = new AttendanceFilter(factoryId, employeeId, from, to, page, size);
-        Page<DailyAttendance> result = queryService.dailyRecords(context, filter);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(queryService.dailyRecords(context, filter));
     }
 
-    /**
-     * GET /api/v1/attendance/presence: Danh sách hiện diện phục vụ an ninh/sơ tán.
-     */
     @GetMapping("/presence")
-    public ResponseEntity<PresenceView> getPresence(
-            @RequestParam("factoryId") UUID factoryId
-    ) {
+    public ResponseEntity<PresenceView> getPresence(@RequestParam("factoryId") UUID factoryId) {
         ActorContext context = resolveActor();
         if (!ActorContext.SCOPE_GLOBAL.equals(context.scope())
                 && (context.factoryIds().isEmpty() || !context.factoryIds().contains(factoryId.toString()))) {
             throw new SecurityException("Không có quyền xem hiện diện của nhà máy ngoài phạm vi được gán.");
         }
-        PresenceView presence = queryService.getPresence(factoryId);
-        return ResponseEntity.ok(presence);
+        return ResponseEntity.ok(queryService.getPresence(factoryId));
     }
 
-    /**
-     * POST /api/v1/attendance/adjustments: Gửi yêu cầu điều chỉnh công (CONTRACT-V1 §9).
-     */
     @PostMapping("/adjustments")
     public ResponseEntity<Adjustment> createAdjustment(
             @RequestBody AdjustmentRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey
     ) {
         ActorContext context = resolveActor();
-        if (idempotencyKey == null || idempotencyKey.isBlank()) {
-            throw new IllegalArgumentException("Header Idempotency-Key bắt buộc.");
-        }
-        String cacheKey = context.userId() + "|POST:/api/v1/attendance/adjustments|" + idempotencyKey.trim();
-        String hash = sha256(String.valueOf(request));
-        Instant now = Instant.now();
-        CachedAdjustment existing = adjustmentIdempotency.get(cacheKey);
-        if (existing != null && now.isBefore(existing.expiresAt())) {
-            if (!existing.payloadHash().equals(hash)) {
-                throw new IdempotencyConflictException("Idempotency-Key đã được dùng với nội dung điều chỉnh khác.");
-            }
-            return ResponseEntity.status(HttpStatus.CREATED).body(existing.adjustment());
-        }
-        Adjustment created = queryService.createAdjustment(context, request);
-        adjustmentIdempotency.put(cacheKey, new CachedAdjustment(hash, created, now.plus(48, ChronoUnit.HOURS)));
+        Adjustment created = idempotencyService.execute(
+                context.userId(),
+                "POST:/api/v1/attendance/adjustments",
+                idempotencyKey,
+                request,
+                HttpStatus.CREATED.value(),
+                Adjustment.class,
+                () -> queryService.createAdjustment(context, request));
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
-    /**
-     * GET /api/v1/attendance/adjustments: Danh sách yêu cầu điều chỉnh công (Page<Adjustment>).
-     */
     @GetMapping("/adjustments")
     public ResponseEntity<Page<Adjustment>> queryAdjustments(
             @RequestParam(value = "employeeId", required = false) UUID employeeId,
@@ -166,13 +124,9 @@ public final class AttendanceController {
             @RequestParam(value = "size", defaultValue = "20") int size
     ) {
         ActorContext context = resolveActor();
-        Page<Adjustment> result = queryService.queryAdjustments(context, employeeId, state, page, size);
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(queryService.queryAdjustments(context, employeeId, state, page, size));
     }
 
-    /**
-     * POST /api/v1/attendance/adjustments/{id}/decision: Phê duyệt hoặc từ chối điều chỉnh (CONTRACT-V1 §9).
-     */
     public ResponseEntity<Adjustment> decideAdjustment(UUID id, AdjustmentDecision decision) {
         return decideAdjustment(id, decision, null);
     }
@@ -185,34 +139,24 @@ public final class AttendanceController {
     ) {
         ActorContext context = resolveActor();
         if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            String cacheKey = context.userId() + "|POST:/api/v1/attendance/adjustments/" + id + "/decision|" + idempotencyKey.trim();
-            String hash = sha256(id + "|" + decision);
-            Instant now = Instant.now();
-            CachedAdjustment existing = adjustmentIdempotency.get(cacheKey);
-            if (existing != null && now.isBefore(existing.expiresAt())) {
-                if (!existing.payloadHash().equals(hash)) {
-                    throw new IdempotencyConflictException("Idempotency-Key đã được dùng với quyết định điều chỉnh khác.");
-                }
-                return ResponseEntity.ok(existing.adjustment());
-            }
-            Adjustment updated = queryService.decideAdjustment(context, id, decision);
-            adjustmentIdempotency.put(cacheKey, new CachedAdjustment(hash, updated, now.plus(48, ChronoUnit.HOURS)));
+            Adjustment updated = idempotencyService.execute(
+                    context.userId(),
+                    "POST:/api/v1/attendance/adjustments/" + id + "/decision",
+                    idempotencyKey,
+                    Map.of("id", id.toString(), "decision", decision),
+                    HttpStatus.OK.value(),
+                    Adjustment.class,
+                    () -> queryService.decideAdjustment(context, id, decision));
             return ResponseEntity.ok(updated);
         }
-        Adjustment updated = queryService.decideAdjustment(context, id, decision);
-        return ResponseEntity.ok(updated);
+        return ResponseEntity.ok(queryService.decideAdjustment(context, id, decision));
     }
-
-    // --- Các endpoint bổ trợ và tương thích ngược ---
 
     @GetMapping("/view/{employeeId}")
     public ResponseEntity<AttendanceView> findAttendance(@PathVariable("employeeId") String employeeId) {
         ActorContext context = resolveActor();
-        if (ActorContext.SCOPE_SELF.equals(context.scope()) && !employeeId.equals(context.employeeId())) {
-            throw new SecurityException("Tài khoản SELF chỉ được xem dữ liệu của chính mình.");
-        }
-        AttendanceView view = queryService.findAttendance(employeeId);
-        return ResponseEntity.ok(view);
+        enforceLegacyReadScope(context, employeeId, null);
+        return ResponseEntity.ok(queryService.findAttendance(employeeId));
     }
 
     @GetMapping("/summary")
@@ -222,36 +166,50 @@ public final class AttendanceController {
             @RequestParam(value = "factoryId", defaultValue = "F01") String factoryId
     ) {
         ActorContext context = resolveActor();
-        if (ActorContext.SCOPE_SELF.equals(context.scope()) && !employeeId.equals(context.employeeId())) {
-            throw new SecurityException("Tài khoản SELF chỉ được xem tổng hợp công của chính mình.");
-        }
-        YearMonth period = YearMonth.parse(periodStr);
-        MonthlyAttendanceSummaryView summary = queryService.getMonthlySummary(employeeId, period, factoryId);
-        return ResponseEntity.ok(summary);
+        enforceLegacyReadScope(context, employeeId, factoryId);
+        return ResponseEntity.ok(queryService.getMonthlySummary(employeeId, YearMonth.parse(periodStr), factoryId));
     }
 
     @PostMapping("/adjustments/legacy-request")
     public ResponseEntity<AttendanceAdjustmentView> requestAdjustmentLegacy(@RequestBody AdjustmentRequestCommand command) {
         resolveActor();
         if (adjustmentService == null) return ResponseEntity.badRequest().build();
-        AttendanceAdjustmentView view = adjustmentService.requestAdjustment(command);
-        return ResponseEntity.status(HttpStatus.CREATED).body(view);
+        return ResponseEntity.status(HttpStatus.CREATED).body(adjustmentService.requestAdjustment(command));
     }
 
     @PostMapping("/adjustments/legacy-review")
     public ResponseEntity<AttendanceAdjustmentView> reviewAdjustmentLegacy(@RequestBody AdjustmentReviewCommand command) {
         resolveActor();
         if (adjustmentService == null) return ResponseEntity.badRequest().build();
-        AttendanceAdjustmentView view = adjustmentService.reviewAdjustment(command);
-        return ResponseEntity.ok(view);
+        return ResponseEntity.ok(adjustmentService.reviewAdjustment(command));
     }
 
-    private static String sha256(String input) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(input.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 unavailable", e);
+    private static void enforceLegacyReadScope(ActorContext context, String employeeId, String factoryId) {
+        if (context == null || context.scope() == null || context.scope().isBlank()) {
+            throw new SecurityException("Thiếu ngữ cảnh phân quyền.");
         }
+        if (ActorContext.SCOPE_GLOBAL.equals(context.scope())) {
+            return;
+        }
+        if (ActorContext.SCOPE_SELF.equals(context.scope())) {
+            if (context.employeeId() == null || !employeeId.equals(context.employeeId())) {
+                throw new SecurityException("Tài khoản SELF chỉ được xem dữ liệu của chính mình.");
+            }
+            return;
+        }
+        if (ActorContext.SCOPE_FACTORY.equals(context.scope())) {
+            if (context.factoryIds().isEmpty()
+                    || (factoryId != null && !context.factoryIds().contains(factoryId))) {
+                throw new SecurityException("Không có quyền xem dữ liệu nhà máy ngoài phạm vi được gán.");
+            }
+            return;
+        }
+        if (ActorContext.SCOPE_DEPARTMENT.equals(context.scope())) {
+            if (context.departmentIds().isEmpty()) {
+                throw new SecurityException("Tài khoản DEPARTMENT chưa được gán phòng ban.");
+            }
+            return;
+        }
+        throw new SecurityException("Phạm vi phân quyền không hợp lệ.");
     }
 }

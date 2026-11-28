@@ -1,0 +1,18 @@
+# PHỤ TRÁCH: Task 8. Stack kiểm chứng cô lập (port & volume riêng), không đụng stack người dùng đang chạy.
+# Cách chạy:
+#   docker compose --env-file .env.verify.local -f compose.yml -f compose.preview.yml -f compose.verify.yml -p tmc-verify-isolated up -d --build
+# Cách dọn sạch (chỉ xóa stack test này):
+#   docker compose --env-file .env.verify.local -f compose.yml -f compose.preview.yml -f compose.verify.yml -p tmc-verify-isolated down -v
+services:
+  central:
+    ports: !override
+      - '127.0.0.1:18080:8080'
+    environment:
+      TMC_QR_KEYSTORE_PATH: /var/lib/tmc/keystore/qr-signing-keys.json
+    volumes:
+      - qr_keystore_data:/var/lib/tmc/keystore
+  frontend:
+    ports: !override
+      - '127.0.0.1:15173:8080'
+volumes:
+  qr_keystore_data:

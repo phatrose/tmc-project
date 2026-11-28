@@ -10,7 +10,7 @@ import LoginPage from './pages/LoginPage.jsx';
 import DashboardView from './pages/DashboardView.jsx';
 import { routes, canAccess, routeFromHash } from './navigation.js';
 import { getSession, subscribeSession, getAccessToken } from './session.js';
-import { logout, request } from './api.js';
+import { logout, request, restoreSession } from './api.js';
 import { createReportsApi } from './pages/reportsApi.js';
 import RequestState from './components/RequestState.jsx';
 import AppErrorBoundary from './components/AppErrorBoundary.jsx';
@@ -19,12 +19,15 @@ const API_BASE = import.meta.env?.VITE_API_BASE_URL ?? '/api/v1';
 
 const reportsApi = createReportsApi(request, async (path, { signal } = {}) => {
   if (!/^\/(reports|audit)\/exports\/[0-9a-f-]+\/file$/.test(path)) throw new Error('Invalid export path');
+  const headers = { 'X-Request-Id': crypto.randomUUID() };
+  const token = getAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
   const response = await fetch(API_BASE + path, {
     signal,
-    credentials: 'omit',
+    credentials: 'same-origin',
     redirect: 'error',
     cache: 'no-store',
-    headers: { Authorization: `Bearer ${getAccessToken()}`, 'X-Request-Id': crypto.randomUUID() },
+    headers,
   });
   if (!response.ok) throw new Error('Không tải được báo cáo: ' + response.status);
   return response.blob();
@@ -88,6 +91,19 @@ export default function App() {
   const [hash, setHash] = useState(window.location.hash);
   const [logoutError, setLogoutError] = useState(null);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [restoring, setRestoring] = useState(() => !getSession());
+
+  useEffect(() => {
+    if (getSession()) {
+      setRestoring(false);
+      return;
+    }
+    let active = true;
+    restoreSession().finally(() => {
+      if (active) setRestoring(false);
+    });
+    return () => { active = false; };
+  }, []);
   const [now, setNow] = useState(() => Date.now());
   const session = useSyncExternalStore(subscribeSession, getSession, () => null);
   const route = routeFromHash(hash);
@@ -124,13 +140,26 @@ export default function App() {
     }
   }
 
+  if (restoring && !session && route?.id !== 'kiosk') {
+    return (
+      <main id="content" className="login-standalone" tabIndex={-1}>
+        <div className="ops-empty" aria-busy="true">
+          <p>Đang khôi phục phiên làm việc…</p>
+        </div>
+      </main>
+    );
+  }
+
   if (showStandaloneLogin) {
     return (
       <main id="content" className="login-standalone" tabIndex={-1}>
         <AppErrorBoundary key="login:guest">
           <LoginPage
             onLoginSuccess={() => {
-              window.location.hash = '/home';
+              const current = routeFromHash(window.location.hash);
+              if (!current || current.id === 'login') {
+                window.location.hash = '/home';
+              }
             }}
           />
         </AppErrorBoundary>

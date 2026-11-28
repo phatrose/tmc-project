@@ -9,7 +9,8 @@ RUN mvn -B -ntp -pl central-backend -am package -DskipTests
 
 FROM eclipse-temurin:21-jre-jammy
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/* && useradd --system --uid 10001 app
+    && rm -rf /var/lib/apt/lists/* && useradd --system --uid 10001 app \
+    && mkdir -p /var/lib/tmc/keystore && chown 10001:10001 /var/lib/tmc/keystore && chmod 700 /var/lib/tmc/keystore
 WORKDIR /app
 COPY --from=build --chown=10001:10001 /workspace/central-backend/target/central-backend-*.jar app.jar
 USER 10001

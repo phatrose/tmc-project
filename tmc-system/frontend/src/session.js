@@ -27,6 +27,22 @@ export function setSession(value) {
   expiryTimer.unref?.();
   notify();
 }
+export function setCookieSession(actor, expiresAt) {
+  const remaining = Date.parse(expiresAt) - Date.now();
+  if (!actor || !Array.isArray(actor.roles) || !Array.isArray(actor.permissions) ||
+      !Number.isFinite(remaining) || remaining <= 0) {
+    throw new TypeError('Invalid cookie session');
+  }
+  clearTimeout(expiryTimer);
+  session = structuredClone({ tokenType: 'Cookie', accessToken: null, expiresAt, actor });
+  Object.freeze(session.actor.roles);
+  Object.freeze(session.actor.permissions);
+  Object.freeze(session.actor);
+  Object.freeze(session);
+  expiryTimer = setTimeout(clearSession, remaining);
+  expiryTimer.unref?.();
+  notify();
+}
 export function getSession() { return session; }
 export function getAccessToken() {
   if (session && Date.parse(session.expiresAt) <= Date.now()) clearSession();

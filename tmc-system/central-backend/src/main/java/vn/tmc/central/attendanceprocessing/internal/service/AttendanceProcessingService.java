@@ -61,6 +61,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 /**
  * PHỤ TRÁCH: Task 3.
@@ -92,7 +93,22 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
     private final DailyAttendanceRepository dailyRepository;
     private final SyncConflictRepository conflictRepository;
     private final AttendanceAdjustmentPort adjustmentPort;
+    private final Function<UUID, String> employeeDepartmentLookup;
     private final Map<String, String> syncBatchFingerprints = new ConcurrentHashMap<>();
+
+    public AttendanceProcessingService(
+            AttendanceRepository attendanceRepository,
+            DailyAttendanceRepository dailyRepository,
+            SyncConflictRepository conflictRepository,
+            AttendanceAdjustmentPort adjustmentPort,
+            Function<UUID, String> employeeDepartmentLookup
+    ) {
+        this.attendanceRepository = Objects.requireNonNull(attendanceRepository, "attendanceRepository must not be null");
+        this.dailyRepository = Objects.requireNonNull(dailyRepository, "dailyRepository must not be null");
+        this.conflictRepository = Objects.requireNonNull(conflictRepository, "conflictRepository must not be null");
+        this.adjustmentPort = adjustmentPort;
+        this.employeeDepartmentLookup = employeeDepartmentLookup;
+    }
 
     public AttendanceProcessingService(
             AttendanceRepository attendanceRepository,
@@ -100,10 +116,7 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
             SyncConflictRepository conflictRepository,
             AttendanceAdjustmentPort adjustmentPort
     ) {
-        this.attendanceRepository = Objects.requireNonNull(attendanceRepository, "attendanceRepository must not be null");
-        this.dailyRepository = Objects.requireNonNull(dailyRepository, "dailyRepository must not be null");
-        this.conflictRepository = Objects.requireNonNull(conflictRepository, "conflictRepository must not be null");
-        this.adjustmentPort = adjustmentPort;
+        this(attendanceRepository, dailyRepository, conflictRepository, adjustmentPort, null);
     }
 
     public AttendanceProcessingService(
@@ -469,8 +482,10 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
     @Override
     public Page<DailyAttendance> dailyRecords(ActorContext context, AttendanceFilter filter) {
         Objects.requireNonNull(filter, "filter must not be null");
+        requireValidActorScope(context);
         UUID scopedEmployeeId = enforceEmployeeScope(context, filter.employeeId());
         enforceFactoryScope(context, filter.factoryId());
+        enforceDepartmentScopeForEmployee(context, scopedEmployeeId);
 
         List<DailyAttendanceRecord> list = dailyRepository.findByEmployeeIdAndDateRange(
                 scopedEmployeeId,
@@ -479,6 +494,7 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
         ).stream()
                 .filter(r -> filter.factoryId() == null || filter.factoryId().equals(r.getFactoryId()))
                 .filter(r -> isFactoryAllowed(context, r.getFactoryId()))
+                .filter(r -> isDepartmentAllowed(context, r.getEmployeeId()))
                 .toList();
 
         int start = Math.min(filter.page() * filter.size(), list.size());
@@ -493,8 +509,10 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
     @Override
     public Page<AttendanceEventView> queryEvents(ActorContext context, UUID employeeId, UUID factoryId, Instant from, Instant to, int page, int size) {
         validatePaging(page, size);
+        requireValidActorScope(context);
         UUID scopedEmployeeId = enforceEmployeeScope(context, employeeId);
         enforceFactoryScope(context, factoryId);
+        enforceDepartmentScopeForEmployee(context, scopedEmployeeId);
 
         Instant effectiveTo = to != null ? to : Instant.now();
         Instant effectiveFrom = from != null ? from : effectiveTo.minus(7, ChronoUnit.DAYS);
@@ -508,6 +526,7 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
         List<AttendanceEvent> raw = attendanceRepository.findByEmployeeIdAndDateRange(scopedEmployeeId, effectiveFrom, effectiveTo).stream()
                 .filter(e -> factoryId == null || factoryId.equals(e.getFactoryId()))
                 .filter(e -> isFactoryAllowed(context, e.getFactoryId()))
+                .filter(e -> isDepartmentAllowed(context, e.getEmployeeId()))
                 .toList();
 
         int start = Math.min(page * size, raw.size());
@@ -676,8 +695,27 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
         }
     }
 
+    private static void requireValidActorScope(ActorContext context) {
+        if (context == null || context.scope() == null || context.scope().isBlank()) {
+            throw new SecurityException("Thiếu ngữ cảnh phân quyền (ActorContext/scope).");
+        }
+        String scope = context.scope();
+        if (!ActorContext.SCOPE_SELF.equals(scope)
+                && !ActorContext.SCOPE_DEPARTMENT.equals(scope)
+                && !ActorContext.SCOPE_FACTORY.equals(scope)
+                && !ActorContext.SCOPE_GLOBAL.equals(scope)) {
+            throw new SecurityException("Phạm vi phân quyền không hợp lệ: " + scope);
+        }
+        if (ActorContext.SCOPE_FACTORY.equals(scope) && context.factoryIds().isEmpty()) {
+            throw new SecurityException("Tài khoản FACTORY chưa được gán nhà máy (fail closed).");
+        }
+        if (ActorContext.SCOPE_DEPARTMENT.equals(scope) && context.departmentIds().isEmpty()) {
+            throw new SecurityException("Tài khoản DEPARTMENT chưa được gán phòng ban (fail closed).");
+        }
+    }
+
     private static UUID enforceEmployeeScope(ActorContext context, UUID requestedEmployeeId) {
-        if (context == null || !ActorContext.SCOPE_SELF.equals(context.scope())) {
+        if (!ActorContext.SCOPE_SELF.equals(context.scope())) {
             return requestedEmployeeId;
         }
         if (context.employeeId() == null || context.employeeId().isBlank()) {
@@ -691,19 +729,49 @@ public final class AttendanceProcessingService implements AttendanceQueries, Att
     }
 
     private static void enforceFactoryScope(ActorContext context, UUID requestedFactoryId) {
-        if (context == null || ActorContext.SCOPE_GLOBAL.equals(context.scope()) || requestedFactoryId == null) {
+        if (ActorContext.SCOPE_GLOBAL.equals(context.scope()) || requestedFactoryId == null) {
             return;
         }
-        if (!context.factoryIds().isEmpty() && !context.factoryIds().contains(requestedFactoryId.toString())) {
+        if (ActorContext.SCOPE_SELF.equals(context.scope())) {
+            if (!context.factoryIds().isEmpty() && !context.factoryIds().contains(requestedFactoryId.toString())) {
+                throw new SecurityException("Không có quyền truy cập nhà máy ngoài phạm vi được gán.");
+            }
+            return;
+        }
+        if (context.factoryIds().isEmpty() || !context.factoryIds().contains(requestedFactoryId.toString())) {
             throw new SecurityException("Không có quyền truy cập nhà máy ngoài phạm vi được gán.");
         }
     }
 
     private static boolean isFactoryAllowed(ActorContext context, UUID factoryId) {
-        if (context == null || ActorContext.SCOPE_GLOBAL.equals(context.scope()) || context.factoryIds().isEmpty()) {
+        if (ActorContext.SCOPE_GLOBAL.equals(context.scope())) {
             return true;
         }
-        return factoryId != null && context.factoryIds().contains(factoryId.toString());
+        if (ActorContext.SCOPE_SELF.equals(context.scope())) {
+            return context.factoryIds().isEmpty()
+                    || (factoryId != null && context.factoryIds().contains(factoryId.toString()));
+        }
+        return factoryId != null && !context.factoryIds().isEmpty() && context.factoryIds().contains(factoryId.toString());
+    }
+
+    private void enforceDepartmentScopeForEmployee(ActorContext context, UUID requestedEmployeeId) {
+        if (!ActorContext.SCOPE_DEPARTMENT.equals(context.scope()) || requestedEmployeeId == null) {
+            return;
+        }
+        if (!isDepartmentAllowed(context, requestedEmployeeId)) {
+            throw new SecurityException("Không có quyền truy cập nhân viên ngoài phòng ban được gán.");
+        }
+    }
+
+    private boolean isDepartmentAllowed(ActorContext context, UUID employeeId) {
+        if (!ActorContext.SCOPE_DEPARTMENT.equals(context.scope())) {
+            return true;
+        }
+        if (context.departmentIds().isEmpty() || employeeId == null || employeeDepartmentLookup == null) {
+            return false;
+        }
+        String deptId = employeeDepartmentLookup.apply(employeeId);
+        return deptId != null && context.departmentIds().contains(deptId);
     }
 
     private static UUID parseUuidSafe(String val) {

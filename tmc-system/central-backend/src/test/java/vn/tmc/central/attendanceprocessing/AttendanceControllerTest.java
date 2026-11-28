@@ -91,7 +91,21 @@ public class AttendanceControllerTest {
         );
 
         SyncBatchRequest batch = new SyncBatchRequest(UUID.randomUUID(), List.of(env));
-        ResponseEntity<SyncBatchAck> response = syncController.synchronize(batch, EDGE_ID.toString(), FACTORY_ID.toString());
+        // Không có mTLS principal -> fail closed DeviceBindingException
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        assertThrows(vn.tmc.central.attendanceprocessing.internal.service.DeviceBindingException.class,
+                () -> syncController.synchronize(batch));
+
+        // Có mTLS DeviceContext principal hợp lệ -> 200 ACCEPTED
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        new vn.tmc.contracts.DeviceContext(EDGE_ID, FACTORY_ID), null, List.of()));
+        ResponseEntity<SyncBatchAck> response;
+        try {
+            response = syncController.synchronize(batch);
+        } finally {
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        }
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertNotNull(response.getBody());
@@ -112,7 +126,7 @@ public class AttendanceControllerTest {
                 "OUT",
                 "Quên quẹt thẻ ra do thiết bị cổng bảo trì tại cửa B."
         );
-        ResponseEntity<Adjustment> createResp = attendanceController.createAdjustment(req, "idemp-key-1");
+        ResponseEntity<Adjustment> createResp = attendanceController.createAdjustment(req, UUID.randomUUID().toString());
         assertEquals(HttpStatus.CREATED, createResp.getStatusCode());
         assertNotNull(createResp.getBody());
         UUID adjId = createResp.getBody().id();

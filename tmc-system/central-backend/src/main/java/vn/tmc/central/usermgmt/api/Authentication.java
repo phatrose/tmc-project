@@ -42,6 +42,20 @@ public interface Authentication {
     }
 
     /**
+     * Xác thực lại mật khẩu gắn chặt với đúng phiên hiện tại (CONTRACT-V1 §4, AUTH-07).
+     */
+    default ReauthResponse reauth(String accessToken, ReauthRequest request) {
+        return reauth(getActorContext(accessToken), request);
+    }
+
+    /**
+     * Kiểm tra phiên hiện tại đã được xác thực lại trong 5 phút gần nhất hay chưa.
+     */
+    default boolean isSessionReauthenticated(String accessToken) {
+        return false;
+    }
+
+    /**
      * Thu hồi toàn bộ phiên đang hoạt động của một tài khoản (khi khóa hoặc đổi quyền).
      */
     default void revokeSessionsForUser(String userId) {}

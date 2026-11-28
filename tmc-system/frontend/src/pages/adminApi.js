@@ -61,5 +61,12 @@ export function createAdminApi(request) {
         idempotencyKey: crypto.randomUUID(),
       });
     },
+    triggerOperationJob(jobType, idempotencyKey) {
+      return request('/operations/jobs', {
+        method: 'POST',
+        body: { jobType },
+        idempotencyKey: idempotencyKey || crypto.randomUUID(),
+      });
+    },
   };
 }
