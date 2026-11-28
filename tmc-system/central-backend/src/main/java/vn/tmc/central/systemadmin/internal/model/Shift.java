@@ -1,14 +1,41 @@
 package vn.tmc.central.systemadmin.internal.model;
 
-
+import java.time.LocalTime;
+import java.util.Objects;
 
 /**
  * PHỤ TRÁCH: Task 5.
- * Khung triển khai theo docs/DECISIONS.md; chưa có nghiệp vụ hoạt động.
- * TODO: validation, repository, API và UI quản lý thuộc system-admin.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Model/DTO mô tả dữ liệu với các trường tối thiểu hiện có, không phải schema đầy đủ.
- * - Cần làm: Chốt ID, nullability, trường bắt buộc và quan hệ trước khi thêm validation/migration; tham chiếu checklist dữ liệu trong docs.
- * - Lưu ý bàn giao: Không thêm phụ thuộc UI/HTTP vào model; record không tự thực thi nghiệp vụ hoặc kiểm tra quyền truy cập.
+ * VAI TRÒ: Domain Model cho Shift (Ca làm việc).
+ * NGUỒN: main.pdf, FR-SA-02; §5.1; DECISIONS.md §1.
  */
-public record Shift(String id, String factoryId, java.time.LocalTime startsAt, java.time.LocalTime endsAt) {}
+public record Shift(
+    String id,
+    String factoryId,
+    String name,
+    LocalTime startsAt,
+    LocalTime endsAt,
+    boolean isOvernight,
+    int gracePeriodMinutesLate,
+    int gracePeriodMinutesEarly,
+    boolean active
+) {
+    public Shift {
+        Objects.requireNonNull(id, "shiftId must not be null");
+        Objects.requireNonNull(factoryId, "factoryId must not be null");
+        Objects.requireNonNull(startsAt, "startsAt must not be null");
+        Objects.requireNonNull(endsAt, "endsAt must not be null");
+        if (name == null || name.isBlank()) {
+            name = id;
+        }
+        // Tự động nhận diện ca đêm qua ngày nếu kết thúc <= bắt đầu
+        if (endsAt.isBefore(startsAt) || endsAt.equals(startsAt)) {
+            isOvernight = true;
+        }
+        if (gracePeriodMinutesLate < 0) gracePeriodMinutesLate = 0;
+        if (gracePeriodMinutesEarly < 0) gracePeriodMinutesEarly = 0;
+    }
+
+    public Shift(String id, String factoryId, LocalTime startsAt, LocalTime endsAt) {
+        this(id, factoryId, id, startsAt, endsAt, endsAt.isBefore(startsAt) || endsAt.equals(startsAt), 15, 15, true);
+    }
+}

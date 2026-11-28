@@ -1,14 +1,25 @@
 package vn.tmc.central.systemadmin.internal.model;
 
-
+import java.time.ZoneId;
+import java.util.Objects;
 
 /**
  * PHỤ TRÁCH: Task 5.
- * Khung triển khai theo docs/DECISIONS.md; chưa có nghiệp vụ hoạt động.
- * TODO: validation, repository, API và UI quản lý thuộc system-admin.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Model/DTO mô tả dữ liệu với các trường tối thiểu hiện có, không phải schema đầy đủ.
- * - Cần làm: Chốt ID, nullability, trường bắt buộc và quan hệ trước khi thêm validation/migration; tham chiếu checklist dữ liệu trong docs.
- * - Lưu ý bàn giao: Không thêm phụ thuộc UI/HTTP vào model; record không tự thực thi nghiệp vụ hoặc kiểm tra quyền truy cập.
+ * VAI TRÒ: Domain Model cho Factory.
+ * NGUỒN: main.pdf, §1.2; §5.1; DECISIONS.md §1.
  */
-public record Factory(String id, String name, String zoneId) {}
+public record Factory(String id, String name, String zoneId, String address, String status) {
+    public Factory {
+        Objects.requireNonNull(id, "id must not be null");
+        Objects.requireNonNull(name, "name must not be null");
+        Objects.requireNonNull(zoneId, "zoneId must not be null");
+        ZoneId.of(zoneId); // Kiểm tra zoneId hợp lệ theo chuẩn IANA
+        if (status == null || status.isBlank()) {
+            status = "ACTIVE";
+        }
+    }
+
+    public Factory(String id, String name, String zoneId) {
+        this(id, name, zoneId, "", "ACTIVE");
+    }
+}

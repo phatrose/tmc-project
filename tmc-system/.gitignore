@@ -3,6 +3,11 @@
 **/dist/
 .cache/
 .env
+.env.*
+!.env.example
+**/fixtures.local.json
+tests/evidence/*.json
+tests/evidence/*.log
 *.db
 *.db-wal
 *.db-shm

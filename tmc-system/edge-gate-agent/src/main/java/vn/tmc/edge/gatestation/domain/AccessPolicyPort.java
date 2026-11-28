@@ -1,11 +1,16 @@
 package vn.tmc.edge.gatestation.domain;
 
-/** PHỤ TRÁCH: Task 2. TODO: Hoàn thiện contract và nghiệp vụ theo PDF.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Nhận employeeId và gateId; kết quả boolean thể hiện quyền qua cổng theo policy cục bộ.
- * - Cần làm: Bổ sung clock/ca/hướng/context qua contract khi hiện thực; không gọi Central trong luồng scan.
- * - Lưu ý bàn giao: Thiếu hoặc không xác thực được policy phải có kết quả từ chối rõ; kiểm thử khác nhà máy/khu vực/ca.
+import vn.tmc.contracts.AttendancePayload.Direction;
+
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * PHỤ TRÁCH: Task 2.
+ * Kiểm tra nhân viên có quyền qua gate theo hướng tại thời điểm occurredAt, chỉ dựa trên cache cục bộ
+ * (CONTRACT-V1.md §10: AccessPolicyPort.evaluate). Không gọi Central trong luồng scan.
+ * Thiếu cache hoặc cache hết tin cậy phải trả deny CACHE_UNAVAILABLE, không được mặc định cho qua.
  */
 public interface AccessPolicyPort {
-    boolean isAllowed(String employeeId, String gateId);
+    PolicyDecision evaluate(UUID employeeId, UUID gateId, Direction direction, Instant occurredAt);
 }

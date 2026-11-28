@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 212 40" width="212" height="40" fill="none" role="img" aria-label="TMC System">
+  <rect width="40" height="40" rx="9" fill="#4F46E5"/>
+  <path d="M9 17V11.5C9 10.1193 10.1193 9 11.5 9H17" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="square"/>
+  <path d="M23 9H28.5C29.8807 9 31 10.1193 31 11.5V17" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="square"/>
+  <path d="M9 23V28.5C9 29.8807 10.1193 31 11.5 31H17" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="square"/>
+  <rect x="24" y="24" width="7" height="7" rx="1.5" fill="#34D399"/>
+  <rect x="16" y="16" width="8" height="8" rx="1.5" fill="#FFFFFF"/>
+  <text x="52" y="27" fill="#111827" font-family="'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="21" font-weight="700" letter-spacing="-0.02em">TMC</text>
+  <text x="106" y="27" fill="#4B5563" font-family="'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="21" font-weight="500" letter-spacing="-0.015em">System</text>
+</svg>

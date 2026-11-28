@@ -2,6 +2,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import './style.css';
+import './styles/module-theme.css';
+import AppErrorBoundary from './components/AppErrorBoundary.jsx';
 
 
 /**
@@ -12,4 +14,4 @@ import './style.css';
  */
 
 // PHỤ TRÁCH: Task 8.
-createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>);
+createRoot(document.getElementById('root')).render(<React.StrictMode><AppErrorBoundary><App /></AppErrorBoundary></React.StrictMode>);

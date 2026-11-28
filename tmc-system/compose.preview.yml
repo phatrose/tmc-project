@@ -1,0 +1,6 @@
+# PHỤ TRÁCH: Task 8. Local preview only; never a production default.
+services:
+  central:
+    environment:
+      SPRING_PROFILES_ACTIVE: integration-preview
+      TMC_PREVIEW_PASSWORD: ${TMC_PREVIEW_PASSWORD:-123456}

@@ -1,33 +1,51 @@
 package vn.tmc.edge.edgesync.application;
 
+import vn.tmc.contracts.BootstrapResponse.Mode;
+import vn.tmc.edge.edgesync.domain.BootstrapCache;
 import vn.tmc.edge.edgesync.domain.BootstrapPort;
+import vn.tmc.edge.edgesync.domain.BootstrapProtocolException;
 
-/**
- * KHUNG TRIỂN KHAI — có khai báo, chưa hiện thực nghiệp vụ.
- * PHỤ TRÁCH: Task 7.
- * VAI TRÒ: Use case / worker.
- * NGUỒN: main.pdf, §6.2.2–6.2.3; §7.3–7.4.
- * TÀI LIỆU PDF: docs/tasks/06-edge-offline.md; docs/REQUIREMENTS.md.
- * TODO[Task 7]: mTLS bootstrap delta revision, public keys và policy; chu kỳ dự kiến 30 giây; mục tiêu lan truyền revocation online ≤60 giây.
- * TODO[Task 7]: Áp dụng dữ liệu và cursor cùng transaction; không chấp nhận revision lùi.
- * TODO[Task 7]: Phân biệt revocation cache cũ hợp lệ với cache thiếu/hỏng và trusted key hết hạn.
- * TODO[Task 7]: Offline tối thiểu 24 giờ với cache tin cậy được chuẩn bị trước; chấp nhận cửa sổ thu hồi trễ.
- * TODO[Task 7]: Xác thực cập nhật trước commit; reconnect đồng bộ event/revocation và đối soát POST_REVOKE_VIOLATION.
- * PHỐI HỢP: Task 2, Task 3, Task 6, Task 8.
- * Kiểu dữ liệu là khung đề xuất; chốt contract trước khi tích hợp runtime.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Nhận delta/snapshot public key, revocation và policy thông qua BootstrapPort.
- * - Cần làm: Xác thực dữ liệu rồi commit cache và revision cùng transaction; online mục tiêu cập nhật thu hồi ≤60 giây.
- * - Lưu ý bàn giao: Offline dùng cache tin cậy đã chuẩn bị cho ≥24 giờ; reconnect cập nhật và phối hợp đối soát vi phạm thu hồi.
- */
+import java.time.Clock;
+import java.time.Duration;
+import java.util.Objects;
+
 public final class BootstrapWorker {
-    private final BootstrapPort bootstrapPort;
+    public static final Duration POLL_INTERVAL = Duration.ofSeconds(30);
 
-    public BootstrapWorker(BootstrapPort bootstrapPort) {
-        this.bootstrapPort = java.util.Objects.requireNonNull(bootstrapPort);
+    private final BootstrapPort transport;
+    private final BootstrapCache cache;
+    private final Clock clock;
+
+    public BootstrapWorker(BootstrapPort transport, BootstrapCache cache, Clock clock) {
+        this.transport = Objects.requireNonNull(transport);
+        this.cache = Objects.requireNonNull(cache);
+        this.clock = Objects.requireNonNull(clock);
     }
 
     public void refresh() {
-        throw new UnsupportedOperationException("TODO: refresh");
+        var now = clock.instant();
+        long afterRevision = cache.snapshot()
+                .filter(snapshot -> snapshot.trustedAt(now)
+                        && !snapshot.trustDeadline().isBefore(now.plus(BootstrapCache.RENEW_BELOW)))
+                .map(BootstrapCache.Snapshot::revision).orElse(0L);
+        var response = transport.fetch(afterRevision);
+        if (response.notModified()) {
+            if (afterRevision == 0 || response.revision() != afterRevision) {
+                throw new BootstrapProtocolException("304 must confirm a requested trusted revision");
+            }
+            return;
+        }
+        if (afterRevision == 0) {
+            applyFull(response);
+        } else if (cache.apply(response.bundle()) == BootstrapCache.ApplyResult.FULL_REQUIRED) {
+            applyFull(transport.fetch(0));
+        }
+    }
+
+    private void applyFull(BootstrapPort.FetchResult response) {
+        if (response.notModified() || response.bundle().mode() != Mode.FULL
+                || cache.apply(response.bundle()) != BootstrapCache.ApplyResult.APPLIED) {
+            throw new BootstrapProtocolException("Bootstrap renewal requires FULL");
+        }
     }
 }

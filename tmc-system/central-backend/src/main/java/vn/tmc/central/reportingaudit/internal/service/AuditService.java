@@ -1,22 +1,57 @@
 package vn.tmc.central.reportingaudit.internal.service;
 
-/**
- * KHUNG TRIỂN KHAI — có khai báo, chưa hiện thực nghiệp vụ.
- * PHỤ TRÁCH: Task 4.
- * VAI TRÒ: service.
- * NGUỒN: main.pdf, FR-RP-05; BR-08; NFR-AUD-01.
- * TÀI LIỆU PDF: docs/tasks/02-requirements-rbac.md; docs/REQUIREMENTS.md.
- * TODO[Task 4]: Audit append-only cho thao tác nhạy cảm, từ chối, override và lỗi sync.
- * TODO[Task 4]: Actor/device, thời gian, kết quả, correlation ID; không log JWS thô/secret.
- * PHỐI HỢP: Task 3, Task 5, Task 8.
- * Kiểu dữ liệu là khung đề xuất; chốt contract trước khi tích hợp runtime.
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Nhận actorId, hành động và correlationId; bổ sung tài nguyên/thời gian/kết quả theo contract audit.
- * - Cần làm: Ghi append-only, tối thiểu dữ liệu nhạy cảm; cung cấp tìm kiếm theo actor/thời gian/hành động với data scope.
- * - Lưu ý bàn giao: Không cho Auditor hoặc API thông thường sửa/xóa audit; không ghi mật khẩu, private key hoặc JWS.
- */
-public final class AuditService {
-    public void append(String actorId, String action, String correlationId) {
-        throw new UnsupportedOperationException("TODO: append");
+import vn.tmc.central.reportingaudit.api.AuditDraft;
+import vn.tmc.central.reportingaudit.api.AuditEntry;
+import vn.tmc.central.reportingaudit.api.AuditPort;
+import vn.tmc.central.reportingaudit.api.AuditScope;
+import vn.tmc.central.reportingaudit.internal.repository.AuditRepository;
+import java.util.Objects;
+import java.util.UUID;
+
+public final class AuditService implements AuditPort {
+    private final AuditRepository repository;
+
+    public AuditService(AuditRepository repository) {
+        this.repository = Objects.requireNonNull(repository);
+    }
+
+    @Override
+    public UUID append(AuditDraft draft) {
+        return append(draft,new AuditScope(draft.factoryId(),null,null));
+    }
+
+    @Override
+    public UUID append(AuditDraft draft,AuditScope scope) {
+        Objects.requireNonNull(draft);
+        Objects.requireNonNull(scope);
+        if(!Objects.equals(draft.factoryId(),scope.factoryId())) throw new IllegalArgumentException("Audit factory scope mismatch");
+        uuid(scope.employeeId());uuid(scope.departmentId());
+        uuid(draft.actorId());
+        uuid(draft.deviceId());
+        uuid(draft.factoryId());
+        Objects.requireNonNull(draft.correlationId());
+        uuid(draft.correlationId());
+        nonempty(draft.action());
+        nonempty(draft.resourceType());
+        nonempty(draft.resourceId());
+        Objects.requireNonNull(draft.result());
+        Objects.requireNonNull(draft.occurredAt());
+        if (draft.occurredAt().getNano() % 1_000_000 != 0)
+            throw new IllegalArgumentException("occurredAt phải có độ chính xác milliseconds");
+        if (draft.reason() != null) nonempty(draft.reason());
+        UUID id = UUID.randomUUID();
+        repository.append(new AuditEntry(id, draft.actorId(), draft.deviceId(), draft.factoryId(),
+                draft.action(), draft.resourceType(), draft.resourceId(), draft.result(),
+                draft.occurredAt(), draft.correlationId(), draft.reason()),scope);
+        return id;
+    }
+
+    private static void nonempty(String value) {
+        if (value == null || value.isBlank()) throw new IllegalArgumentException("Trường chuỗi không được rỗng");
+    }
+
+    private static void uuid(UUID value) {
+        if (value != null && (value.version() != 4 || value.variant() != 2))
+            throw new IllegalArgumentException("Định danh phải là UUIDv4");
     }
 }

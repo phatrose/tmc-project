@@ -1,15 +1,32 @@
-
-
-/**
- * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: HTTP client chung nhận path/options; response/error contract cần chốt với backend.
- * - Cần làm: Bổ sung base URL, bearer/session, requestId, AbortSignal và ánh xạ ApiError; không log token/mật khẩu.
- * - Lưu ý bàn giao: Không tự retry request thay đổi dữ liệu nếu chưa có idempotency; hàm hiện chủ động báo chưa triển khai.
- */
-
-// PHỤ TRÁCH: Task 8.
-// TODO: base URL, bearer/session, requestId, AbortSignal và ánh xạ ApiError.
-// Không gọi API hoặc lưu token cho tới khi chốt contract bảo mật.
-export async function request(path, options = {}) {
-  throw new Error('TODO: triển khai HTTP client theo docs/tasks/04-api-contracts.md');
+// PHỤ TRÁCH: Task 8. Task 1–7 dùng client này, truyền cùng idempotencyKey khi retry mutation.
+import { createHttpClient } from './httpClient.js';
+import { getAccessToken, clearSession, setSession, setCookieSession } from './session.js';
+export { HttpError } from './httpClient.js';
+export const request = createHttpClient({
+  baseUrl: import.meta.env.VITE_API_BASE_URL || '/api/v1',
+  getToken: getAccessToken,
+  onUnauthorized: clearSession,
+  credentials: 'same-origin',
+});
+// Adapter cho LoginPage của Task 1; không sinh session hoặc user demo.
+export async function login(username, password, options = {}) {
+  const session = await request('/auth/login', { ...options, method: 'POST', body: { username, password }, auth: false });
+  setSession(session);
+  return session.actor;
+}
+export async function restoreSession() {
+  try {
+    const actor = await request('/auth/me', { method: 'GET', auth: false });
+    if (actor && Array.isArray(actor.roles) && Array.isArray(actor.permissions)) {
+      setCookieSession(actor, new Date(Date.now() + 14 * 60 * 1000).toISOString());
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+export async function logout(options = {}) {
+  try { await request('/auth/logout', { idempotencyKey: crypto.randomUUID(), ...options, method: 'POST', body: {} }); }
+  finally { clearSession(); }
 }

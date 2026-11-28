@@ -1,15 +1,35 @@
 package vn.tmc.central.qrsecurity.internal.repository;
 
-import vn.tmc.central.qrsecurity.internal.model.QrCredential;
 import java.util.Optional;
 
-/** PHỤ TRÁCH: Task 6. TODO: Hoàn thiện contract và nghiệp vụ theo PDF.
+import vn.tmc.central.qrsecurity.internal.model.QrCredential;
+
+/**
+ * PHỤ TRÁCH: Task 6.
+ * Port dữ liệu credential QR; adapter JPA/PostgreSQL sẽ hiện thực sau
+ * (migration + unique constraint một ACTIVE trên employeeId).
  * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Port truy cập dữ liệu cho model tương ứng; implementation persistence sẽ được bổ sung sau.
- * - Cần làm: Chốt cách xử lý ID không tồn tại, transaction và truy vấn có scope; findById trả Optional, save không được âm thầm bỏ lỗi.
- * - Lưu ý bàn giao: Đặt JPA mapping/SQL trong adapter, không để service module khác gọi repository trực tiếp; viết test DB thật.
+ * - Đầu vào/vai trò: Service gọi port này; module khác KHÔNG gọi trực tiếp.
+ * - Cần làm: findActiveByEmployeeId trả credential ACTIVE duy nhất;
+ *   save là upsert; replaceActive thu hồi cũ + tạo mới TRONG MỘT transaction
+ *   (yêu cầu nguyên tử của reissue, CONTRACT-V1.md §4: "thu hồi cũ nguyên tử").
+ * - Lưu ý bàn giao: Lỗi DB phải truyền lên caller; không nuốt lỗi, không trả
+ *   null thay Optional.
  */
 public interface QrCredentialRepository {
+
     Optional<QrCredential> findById(String id);
-    void save(QrCredential value);
+
+    Optional<QrCredential> findActiveByEmployeeId(String employeeId);
+
+    Optional<QrCredential> findLatestByEmployeeId(String employeeId);
+
+    void save(QrCredential credential);
+
+    /**
+     * Thao tác nguyên tử cho reissue: thu hồi credential cũ và ghi credential
+     * mới trong cùng transaction. Adapter bắt buộc dùng một transaction; nếu
+     * ghi mới thất bại thì thu hồi cũng phải rollback.
+     */
+    void replaceActive(QrCredential revokedOld, QrCredential createdNew);
 }

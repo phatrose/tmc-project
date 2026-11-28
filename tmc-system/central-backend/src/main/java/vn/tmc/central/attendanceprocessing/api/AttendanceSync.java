@@ -1,14 +1,26 @@
 package vn.tmc.central.attendanceprocessing.api;
 
+import vn.tmc.contracts.DeviceContext;
 import vn.tmc.contracts.SyncBatchRequest;
 import vn.tmc.contracts.SyncBatchAck;
 
-/** PHỤ TRÁCH: Task 3. TODO: Hoàn thiện contract và nghiệp vụ theo PDF.
+/**
+ * PHỤ TRÁCH: Task 3.
+ * VAI TRÒ: Port tiếp nhận sự kiện đồng bộ từ Edge theo CONTRACT-V1.md §7 & §10.
+ * Method: DeviceContext, SyncBatchRequest -> SyncBatchAck
+ * 
  * HƯỚNG DẪN TRIỂN KHAI:
- * - Đầu vào/vai trò: Nhận SyncBatchRequest; trả SyncBatchAck có kết quả từng event và cursor liên tục.
- * - Cần làm: Chốt implementation per-event transaction: commit rồi mới ACK; cùng ID/hash là DUPLICATE, khác hash là CONFLICT.
- * - Lưu ý bàn giao: Một event lỗi không rollback cả batch; không cho Edge sửa factory/edge identity ngoài binding xác thực.
+ * - Nhận SyncBatchRequest (1–50 sự kiện, sequence tăng dần).
+ * - Per-event transaction: commit rồi mới ACK.
+ * - Trùng eventId và cùng hash trả DUPLICATE (code = null, acceptedAt = commit time).
+ * - Trùng eventId khác hash trả CONFLICT (code = "EVENT_CONTENT_CONFLICT", acceptedAt = null).
+ * - Payload hash không hợp lệ trả REJECTED (code = "HASH_MISMATCH").
+ * - Trả lastContiguousSequenceNo là cursor liên tục không có khoảng trống.
  */
 public interface AttendanceSync {
-    SyncBatchAck synchronize(SyncBatchRequest batch);
+    SyncBatchAck synchronize(DeviceContext deviceContext, SyncBatchRequest batch);
+
+    default SyncBatchAck synchronize(SyncBatchRequest batch) {
+        return synchronize(null, batch);
+    }
 }
