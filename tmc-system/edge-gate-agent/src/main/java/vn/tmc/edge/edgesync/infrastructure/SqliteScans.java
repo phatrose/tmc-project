@@ -1,5 +1,6 @@
 package vn.tmc.edge.edgesync.infrastructure;
 
+import vn.tmc.edge.edgesync.api.CommandCompletion;
 import vn.tmc.edge.edgesync.api.CommandIntent;
 import vn.tmc.edge.edgesync.api.EventPayload.CommandMode;
 import vn.tmc.edge.edgesync.api.EventPayload.CommandStatus;
@@ -8,11 +9,14 @@ import vn.tmc.edge.edgesync.api.EventStoreException;
 import vn.tmc.edge.edgesync.api.ReplayReservation;
 import vn.tmc.edge.edgesync.api.ScanInputFingerprint;
 import vn.tmc.edge.edgesync.api.ScanOutcome;
+import vn.tmc.edge.edgesync.domain.BootstrapCache.Identity;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -173,6 +177,104 @@ final class SqliteScans {
             if (statement.executeUpdate() != 1) {
                 throw new SQLException("Command intent was not inserted");
             }
+        }
+    }
+
+    record StoredCommand(UUID scanId, UUID gateId, ScanOutcome.Decision decision, UUID attendanceEventId,
+                         UUID commandId, CommandMode mode, UUID operatorId, String reason,
+                         CommandStatus status, Instant completedAt, String code, UUID resultEventId) {}
+
+    static Optional<StoredCommand> loadCommandForScan(Connection connection, UUID scanId) throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                SELECT s.gate_id AS scan_gate_id, s.decision, s.event_id AS attendance_event_id,
+                       s.command_id AS scan_command_id, s.command_status,
+                       c.command_id, c.gate_id, c.mode, c.operator_id, c.reason,
+                       c.status, c.completed_at, c.code, c.result_event_id
+                FROM local_scan_outcomes s
+                LEFT JOIN local_gate_commands c ON c.scan_id = s.scan_id
+                WHERE s.scan_id = ?
+                """)) {
+            statement.setString(1, scanId.toString());
+            try (var result = statement.executeQuery()) {
+                if (!result.next()) {
+                    return Optional.empty();
+                }
+                UUID scanCommandId = nullableUuid(result.getString("scan_command_id"));
+                UUID commandId = nullableUuid(result.getString("command_id"));
+                if (commandId == null) {
+                    if (scanCommandId != null) {
+                        throw new SQLException("Scan outcome references a missing gate command");
+                    }
+                    return Optional.empty();
+                }
+                UUID scanGateId = UUID.fromString(result.getString("scan_gate_id"));
+                UUID commandGateId = UUID.fromString(result.getString("gate_id"));
+                var decision = ScanOutcome.Decision.valueOf(result.getString("decision"));
+                UUID attendanceEventId = nullableUuid(result.getString("attendance_event_id"));
+                var scanCommandStatus = CommandStatus.valueOf(result.getString("command_status"));
+                var mode = CommandMode.valueOf(result.getString("mode"));
+                var status = CommandStatus.valueOf(result.getString("status"));
+                boolean validMode = mode == CommandMode.EMERGENCY
+                        ? decision == ScanOutcome.Decision.EMERGENCY && attendanceEventId == null
+                        : decision == ScanOutcome.Decision.ALLOW && attendanceEventId != null;
+                if (!Objects.equals(commandId, scanCommandId) || !commandGateId.equals(scanGateId)
+                        || status != scanCommandStatus || !validMode) {
+                    throw new SQLException("Stored scan outcome and command intent are inconsistent");
+                }
+                return Optional.of(new StoredCommand(scanId, commandGateId, decision, attendanceEventId, commandId, mode,
+                        nullableUuid(result.getString("operator_id")), result.getString("reason"), status,
+                        SqliteTime.nullableInstant(result, "completed_at"), result.getString("code"),
+                        nullableUuid(result.getString("result_event_id"))));
+            }
+        }
+    }
+
+    static void completeCommand(Connection connection, UUID scanId, UUID commandId, CommandCompletion completion,
+                                UUID resultEventId) throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                UPDATE local_gate_commands
+                SET status = ?, completed_at = ?, code = ?, result_event_id = ?
+                WHERE command_id = ? AND scan_id = ? AND status = 'NOT_SENT' AND result_event_id IS NULL
+                """)) {
+            statement.setString(1, completion.status().name());
+            statement.setLong(2, completion.completedAt().toEpochMilli());
+            if (completion.code() == null) {
+                statement.setNull(3, Types.VARCHAR);
+            } else {
+                statement.setString(3, completion.code());
+            }
+            statement.setString(4, resultEventId.toString());
+            statement.setString(5, commandId.toString());
+            statement.setString(6, scanId.toString());
+            if (statement.executeUpdate() != 1) {
+                throw new SQLException("Command intent was not updated");
+            }
+        }
+        try (var statement = connection.prepareStatement("""
+                UPDATE local_scan_outcomes
+                SET command_status = ?
+                WHERE scan_id = ? AND command_id = ? AND command_status = 'NOT_SENT'
+                """)) {
+            statement.setString(1, completion.status().name());
+            statement.setString(2, scanId.toString());
+            statement.setString(3, commandId.toString());
+            if (statement.executeUpdate() != 1) {
+                throw new SQLException("Scan command status was not updated");
+            }
+        }
+    }
+
+    static Identity singleRuntimeIdentity(Connection connection) throws SQLException {
+        try (var statement = connection.prepareStatement("SELECT edge_id, factory_id FROM edge_runtime_state");
+             var result = statement.executeQuery()) {
+            if (!result.next()) {
+                throw new SQLException("Edge runtime identity is missing");
+            }
+            var identity = new Identity(UUID.fromString(result.getString(1)), UUID.fromString(result.getString(2)));
+            if (result.next()) {
+                throw new SQLException("Expected a single provisioned Edge runtime identity");
+            }
+            return identity;
         }
     }
 }

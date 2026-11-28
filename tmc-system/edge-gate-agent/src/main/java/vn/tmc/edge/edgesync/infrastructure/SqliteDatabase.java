@@ -20,7 +20,9 @@ import static vn.tmc.edge.edgesync.api.EventStoreException.Code.REPROVISION_REQU
 
 /** Opens short-lived connections to a versioned Edge database. */
 final class SqliteDatabase {
-    private static final String[] MIGRATIONS = {"/schema.sql", "/schema-v2.sql", "/schema-v3.sql", "/schema-v4.sql"};
+    private static final String[] MIGRATIONS = {
+            "/schema.sql", "/schema-v2.sql", "/schema-v3.sql", "/schema-v4.sql", "/schema-v5.sql"
+    };
     private final String jdbcUrl;
     private final Path file;
     private final Identity identity;

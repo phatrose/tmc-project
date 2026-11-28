@@ -64,11 +64,14 @@ final class SqliteOperations {
                 DELETE FROM local_gate_commands WHERE command_id IN (
                     SELECT c.command_id FROM local_gate_commands c JOIN local_scan_outcomes s USING (scan_id)
                     LEFT JOIN event_delivery d ON d.event_id = s.event_id
+                    LEFT JOIN event_delivery rd ON rd.event_id = c.result_event_id
                     WHERE c.command_id = s.command_id AND c.status = s.command_status
                       AND c.status IN ('UNLOCK_ACCEPTED', 'FAILED')
                       AND c.completed_at <= ? AND s.occurred_at <= ?
                       AND c.retain_until <= ? AND s.retain_until <= ?
-                      AND d.state = 'ACKNOWLEDGED'
+                      AND (s.event_id IS NULL OR d.state = 'ACKNOWLEDGED')
+                      AND (c.result_event_id IS NULL OR rd.state = 'ACKNOWLEDGED')
+                      AND (s.event_id IS NOT NULL OR c.result_event_id IS NOT NULL)
                     ORDER BY c.retain_until LIMIT 1000
                 )
                 RETURNING scan_id

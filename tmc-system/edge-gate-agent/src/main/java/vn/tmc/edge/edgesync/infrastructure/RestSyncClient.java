@@ -10,17 +10,23 @@ import javax.net.ssl.SSLContext;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.Objects;
+import java.util.function.Function;
 
 /** HTTPS sync using the provisioned device certificate and Central trust roots. */
 public final class RestSyncClient implements SyncPort {
     private final URI endpoint;
-    private final EdgeHttp http;
+    private final Function<HttpRequest, HttpResponse<byte[]>> sender;
 
     public RestSyncClient(URI endpoint, SSLContext deviceTls) {
+        this(endpoint, new EdgeHttp(Objects.requireNonNull(deviceTls))::send);
+    }
+
+    RestSyncClient(URI endpoint, Function<HttpRequest, HttpResponse<byte[]>> sender) {
         this.endpoint = Objects.requireNonNull(endpoint);
         EdgeHttp.request(endpoint);
-        http = new EdgeHttp(Objects.requireNonNull(deviceTls));
+        this.sender = Objects.requireNonNull(sender);
     }
 
     @Override
@@ -35,7 +41,7 @@ public final class RestSyncClient implements SyncPort {
             throw new SyncProtocolException("Sync request exceeds 1 MiB");
         }
 
-        var response = http.send(EdgeHttp.request(endpoint)
+        var response = sender.apply(EdgeHttp.request(endpoint)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build());
@@ -53,7 +59,7 @@ public final class RestSyncClient implements SyncPort {
         }
 
         try {
-            return WireJson.read(response.body(), SyncBatchAck.class);
+            return WireJson.readResponse(response.body(), SyncBatchAck.class);
         } catch (IOException invalid) {
             throw new SyncProtocolException("Malformed sync ACK", invalid);
         }

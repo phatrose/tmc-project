@@ -6,9 +6,11 @@ import org.junit.jupiter.api.io.TempDir;
 import vn.tmc.contracts.AttendancePayload;
 import vn.tmc.contracts.AttendancePayload.Direction;
 import vn.tmc.contracts.SyncBatchAck;
+import vn.tmc.edge.edgesync.api.CommandCompletion;
 import vn.tmc.edge.edgesync.api.CommittedEvent;
 import vn.tmc.edge.edgesync.api.EventDraft;
 import vn.tmc.edge.edgesync.api.EventPayload;
+import vn.tmc.edge.edgesync.api.EventPayload.CommandStatus;
 import vn.tmc.edge.edgesync.api.EventPayload.ScanMode;
 import vn.tmc.edge.edgesync.api.EventStoreException;
 import vn.tmc.edge.edgesync.api.ReplayReservation;
@@ -18,6 +20,7 @@ import vn.tmc.edge.edgesync.application.CachedAccess;
 import vn.tmc.edge.edgesync.application.ConnectivityMonitor;
 import vn.tmc.edge.edgesync.application.EdgeOperations;
 import vn.tmc.edge.edgesync.application.HeartbeatWorker;
+import vn.tmc.edge.edgesync.application.KeyRefreshWorker;
 import vn.tmc.edge.edgesync.application.SyncWorker;
 import vn.tmc.edge.edgesync.domain.HeartbeatPort;
 import vn.tmc.edge.edgesync.domain.SyncTransportException;
@@ -60,7 +63,8 @@ class SqliteOperationsIT {
         cache.apply(full(clock.instant()));
         var worker = new BootstrapWorker(after -> { throw offline(); }, cache, clock);
         assertThrows(SyncTransportException.class, worker::refresh);
-        var access = new CachedAccess(cache, worker::requestKeyRefresh);
+        var keyWorker = new KeyRefreshWorker(() -> { throw offline(); }, cache);
+        var access = new CachedAccess(cache, keyWorker::requestRefresh);
         var allowed = access.evaluate(EMPLOYEE_ID, JTI, KID, OCCURRED_AT, GATE_ID, clock.instant());
         assertEquals(CachedAccess.Decision.ALLOW, allowed.decision());
         assertEquals(Direction.IN, allowed.gate().direction());
@@ -172,6 +176,29 @@ class SqliteOperationsIT {
         assertEquals("0", read("SELECT count(*) FROM local_gate_commands WHERE command_id = '" + COMMAND_ID + "'"));
         assertEquals("1", read("SELECT count(*) FROM local_gate_commands WHERE status = 'TIMEOUT'"));
         assertEquals("3", read("SELECT count(*) FROM local_events"));
+    }
+
+    @Test
+    void cleanup_retainsCommandUntilResultEventIsAcknowledged() throws Exception {
+        var attendance = allow(SCAN_ID, JTI, COMMAND_ID, GATE_ID, clock.instant());
+        var result = store.recordCommandResult(SCAN_ID,
+                new CommandCompletion(COMMAND_ID, CommandStatus.UNLOCK_ACCEPTED, clock.instant().plusMillis(50), null));
+        var firstBatch = store.pendingBatch(1);
+        assertEquals(List.of(attendance.envelope()), firstBatch.events());
+        store.applyAcknowledgements(new SyncBatchAck(firstBatch.syncBatchId(), List.of(accept(attendance.envelope())), 1));
+
+        clock.advance(Duration.ofHours(49));
+        store.cleanup();
+        assertEquals("1", read("SELECT count(*) FROM local_gate_commands"));
+        assertEquals("1", read("SELECT count(*) FROM local_scan_outcomes"));
+
+        var secondBatch = store.pendingBatch(1);
+        assertEquals(List.of(result.envelope()), secondBatch.events());
+        store.applyAcknowledgements(new SyncBatchAck(secondBatch.syncBatchId(), List.of(accept(result.envelope())), 2));
+        store.cleanup();
+        assertEquals("0", read("SELECT count(*) FROM local_gate_commands"));
+        assertEquals("0", read("SELECT count(*) FROM local_scan_outcomes"));
+        assertEquals("2", read("SELECT count(*) FROM local_events"));
     }
 
     @Test

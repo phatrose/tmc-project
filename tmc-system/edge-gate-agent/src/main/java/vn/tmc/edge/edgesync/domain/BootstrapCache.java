@@ -45,4 +45,5 @@ public interface BootstrapCache {
 
     Optional<Snapshot> snapshot();
     ApplyResult apply(BootstrapResponse bundle);
+    ApplyResult applyKeySet(KeySet keySet);
 }
