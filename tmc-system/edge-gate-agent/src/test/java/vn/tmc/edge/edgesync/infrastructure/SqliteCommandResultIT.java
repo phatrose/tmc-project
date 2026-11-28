@@ -134,10 +134,10 @@ class SqliteCommandResultIT {
         var envelope = result.envelope();
         assertEquals("gate.command.result", envelope.eventType());
         assertEquals(1, envelope.schemaVersion());
-        assertEquals(EDGE_ID.toString(), envelope.edgeId());
-        assertEquals(GATE_ID.toString(), envelope.gateId());
-        assertEquals(FACTORY_ID.toString(), envelope.factoryId());
-        assertEquals(SCAN_ID.toString(), envelope.correlationId());
+        assertEquals(EDGE_ID, envelope.edgeId());
+        assertEquals(GATE_ID, envelope.gateId());
+        assertEquals(FACTORY_ID, envelope.factoryId());
+        assertEquals(SCAN_ID, envelope.correlationId());
         assertEquals(COMPLETED_AT, envelope.occurredAt());
 
         var persisted = read("SELECT payload_text FROM local_events WHERE event_id = '" + envelope.eventId() + "'");
@@ -184,10 +184,10 @@ class SqliteCommandResultIT {
                 new CommandCompletion(COMMAND_ID, CommandStatus.UNLOCK_ACCEPTED, COMPLETED_AT, null));
 
         assertEquals(1, result.envelope().sequenceNo());
-        assertEquals(SCAN_ID.toString(), result.envelope().correlationId());
-        assertEquals(EDGE_ID.toString(), result.envelope().edgeId());
-        assertEquals(GATE_ID.toString(), result.envelope().gateId());
-        assertEquals(FACTORY_ID.toString(), result.envelope().factoryId());
+        assertEquals(SCAN_ID, result.envelope().correlationId());
+        assertEquals(EDGE_ID, result.envelope().edgeId());
+        assertEquals(GATE_ID, result.envelope().gateId());
+        assertEquals(FACTORY_ID, result.envelope().factoryId());
         assertEquals("1", read("SELECT count(*) FROM local_events"));
         var json = new ObjectMapper().readTree(read("SELECT payload_text FROM local_events"));
         assertEquals(COMMAND_ID.toString(), json.get("commandId").asText());

@@ -44,6 +44,11 @@ class CachedAccessPolicyTest {
             public ApplyResult apply(BootstrapResponse bundle) {
                 throw new UnsupportedOperationException();
             }
+
+            @Override
+            public ApplyResult applyKeySet(BootstrapResponse.KeySet keySet) {
+                throw new UnsupportedOperationException("Read-only policy fixture");
+            }
         });
     }
 
