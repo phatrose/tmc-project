@@ -173,6 +173,10 @@ public final class AttendanceController {
     /**
      * POST /api/v1/attendance/adjustments/{id}/decision: Phê duyệt hoặc từ chối điều chỉnh (CONTRACT-V1 §9).
      */
+    public ResponseEntity<Adjustment> decideAdjustment(UUID id, AdjustmentDecision decision) {
+        return decideAdjustment(id, decision, null);
+    }
+
     @PostMapping("/adjustments/{id}/decision")
     public ResponseEntity<Adjustment> decideAdjustment(
             @PathVariable("id") UUID id,
